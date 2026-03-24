@@ -12,7 +12,9 @@ impl SorobanSdkMinor {
     /// @param admin The administrator address.
     pub fn init(env: Env, admin: Address) {
         admin.require_auth();
-        env.storage().instance().set(&String::from_str(&env, "admin"), &admin);
+        env.storage()
+            .instance()
+            .set(&String::from_str(&env, "admin"), &admin);
     }
 
     /// @notice Demonstrates v22 Address handling and cross-contract call patterns.
