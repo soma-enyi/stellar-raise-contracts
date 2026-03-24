@@ -47,8 +47,6 @@
 ///                                 (contributor, amount)
 /// ```
 
-#![no_std]
-
 use soroban_sdk::{token, Address, Env};
 
 use crate::DataKey;

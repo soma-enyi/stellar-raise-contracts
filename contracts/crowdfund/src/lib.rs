@@ -20,6 +20,8 @@ mod proptest_generator_boundary_tests;
 mod test;
 #[cfg(test)]
 mod refund_single_token_tests;
+#[cfg(test)]
+mod stellar_token_minter_test;
 
 pub mod refund_single_token;
 
