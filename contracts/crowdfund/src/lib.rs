@@ -40,6 +40,12 @@ mod refund_single_token_test;
 pub mod soroban_sdk_minor;
 #[cfg(test)]
 mod soroban_sdk_minor_test;
+
+pub mod withdraw_event_emission;
+use withdraw_event_emission::{emit_withdrawal_event, mint_nfts_in_batch};
+#[cfg(test)]
+mod withdraw_event_emission_test;
+
 #[path = "stellar_token_minter_test.rs"]
 mod stellar_token_minter_test;
 
