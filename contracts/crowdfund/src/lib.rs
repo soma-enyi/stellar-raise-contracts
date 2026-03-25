@@ -6,6 +6,10 @@ use soroban_sdk::{
     contract, contractclient, contractimpl, contracttype, token, Address, Env, IntoVal, String,
     Symbol, Vec,
 };
+pub mod contract_state_size;
+#[cfg(test)]
+mod contract_state_size_test;
+
 pub mod refund_single_token;
 use refund_single_token::refund_single_transfer;
 
@@ -311,6 +315,8 @@ impl CrowdfundContract {
             .unwrap_or_else(|| Vec::new(&env));
 
         if !contributors.contains(&contributor) {
+            // Enforce contributor list size limit before appending.
+            contract_state_size::check_contributor_limit(&env).expect("contributor limit exceeded");
             contributors.push_back(contributor.clone());
             env.storage()
                 .persistent()
@@ -387,6 +393,8 @@ impl CrowdfundContract {
             .get(&DataKey::Pledgers)
             .unwrap_or_else(|| Vec::new(&env));
         if !pledgers.contains(&pledger) {
+            // Enforce pledger list size limit before appending.
+            contract_state_size::check_pledger_limit(&env).expect("pledger limit exceeded");
             pledgers.push_back(pledger.clone());
             env.storage()
                 .persistent()
@@ -648,13 +656,6 @@ impl CrowdfundContract {
         Ok(())
     }
 
-    /// Refund a single contributor after campaign failure.
-    ///
-    /// @notice Transfers the full stored contribution from contract to contributor.
-    /// @dev The transfer direction is explicitly contract -> contributor to prevent
-    ///      script-level parameter typos and accidental reverse transfer attempts.
-    /// @param contributor Contributor address to refund.
-    /// @return Ok(()) when the refund is complete or nothing is owed.
     /// Claim a refund for a single contributor (pull-based).
     ///
     /// Each contributor independently claims their own refund after the campaign
@@ -672,15 +673,6 @@ impl CrowdfundContract {
     /// * Requires `contributor.require_auth()` — only the contributor can claim.
     /// * Zeroes the contribution record **before** transfer (checks-effects-interactions).
     /// * Uses `checked_sub` to prevent underflow on `total_raised`.
-    pub fn refund_single(env: Env, contributor: Address) -> Result<(), ContractError> {
-        contributor.require_auth();
-
-    /// Claim a refund for a single contributor (pull-based).
-    ///
-    /// # Errors
-    /// * [`ContractError::CampaignStillActive`] when deadline has not passed.
-    /// * [`ContractError::GoalReached`] when the funding goal was met.
-    /// * [`ContractError::NothingToRefund`] when the contributor has no balance.
     pub fn refund_single(env: Env, contributor: Address) -> Result<(), ContractError> {
         contributor.require_auth();
 
@@ -735,10 +727,6 @@ impl CrowdfundContract {
         env.storage()
             .instance()
             .set(&DataKey::TotalRaised, &new_total);
-
-        let token_address: Address = env.storage().instance().get(&DataKey::Token).unwrap();
-        let token_client = token::Client::new(&env, &token_address);
-        token_client.transfer(&env.current_contract_address(), &contributor, &amount);
 
         env.events()
             .publish(("campaign", "refund_single"), (contributor, amount));
@@ -862,6 +850,10 @@ impl CrowdfundContract {
             panic!("description cannot be empty");
         }
 
+        // Enforce string length and roadmap list size limits.
+        contract_state_size::check_string_len(&description).expect("description too long");
+        contract_state_size::check_roadmap_limit(&env).expect("roadmap limit exceeded");
+
         let mut roadmap: Vec<RoadmapItem> = env
             .storage()
             .instance()
@@ -897,6 +889,9 @@ impl CrowdfundContract {
         if milestone <= goal {
             panic!("stretch goal must be greater than primary goal");
         }
+
+        // Enforce stretch-goal list size limit.
+        contract_state_size::check_stretch_goal_limit(&env).expect("stretch goal limit exceeded");
 
         let mut stretch_goals: Vec<i128> = env
             .storage()

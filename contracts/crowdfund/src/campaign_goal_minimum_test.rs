@@ -55,7 +55,10 @@ fn validate_goal_accepts_one_above_minimum() {
 #[test]
 fn validate_goal_rejects_zero() {
     let err = validate_goal(0).unwrap_err();
-    assert!(err.contains("MIN_GOAL_AMOUNT"), "error should mention MIN_GOAL_AMOUNT: {err}");
+    assert!(
+        err.contains("MIN_GOAL_AMOUNT"),
+        "error should mention MIN_GOAL_AMOUNT: {err}"
+    );
 }
 
 #[test]
