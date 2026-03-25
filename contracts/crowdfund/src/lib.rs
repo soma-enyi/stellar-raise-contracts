@@ -24,17 +24,25 @@ use refund_single_token::{
 mod refund_single_token_test;
 
 pub mod soroban_sdk_minor;
+#[cfg(test)]
+#[path = "stellar_token_minter_test.rs"]
+mod stellar_token_minter_test;
 
 #[cfg(test)]
 mod auth_tests;
 pub mod campaign_goal_minimum;
 #[cfg(test)]
 mod campaign_goal_minimum_test;
+pub mod crowdfund_initialize_function;
+#[cfg(test)]
+#[path = "crowdfund_initialize_function.test.rs"]
+mod crowdfund_initialize_function_test;
 pub mod contribute_error_handling;
 #[cfg(test)]
 mod contribute_error_handling_tests;
 pub mod proptest_generator_boundary;
 #[cfg(test)]
+#[path = "proptest_generator_boundary.test.rs"]
 mod proptest_generator_boundary_tests;
 pub mod stellar_token_minter;
 #[cfg(test)]
@@ -195,60 +203,25 @@ impl CrowdfundContract {
         }
 
         creator.require_auth();
-
-        // Store admin for upgrade authorization.
-        env.storage().instance().set(&DataKey::Admin, &admin);
-
-        if let Some(ref config) = platform_config {
-            if config.fee_bps > 10_000 {
-                panic!("platform fee cannot exceed 100%");
-            }
-            env.storage()
-                .instance()
-                .set(&DataKey::PlatformConfig, config);
-        }
-
-        if let Some(bg) = bonus_goal {
-            if bg <= goal {
-                panic!("bonus goal must be greater than primary goal");
-            }
-            env.storage().instance().set(&DataKey::BonusGoal, &bg);
-        }
-
-        if let Some(bg_description) = bonus_goal_description {
-            if let Err(err) = contract_state_size::validate_bonus_goal_description(&bg_description)
-            {
-                panic!("{}", err);
-            }
-            env.storage()
-                .instance()
-                .set(&DataKey::BonusGoalDescription, &bg_description);
-        }
-
-        env.storage().instance().set(&DataKey::Creator, &creator);
-        env.storage().instance().set(&DataKey::Token, &token);
-        env.storage().instance().set(&DataKey::Goal, &goal);
-        env.storage().instance().set(&DataKey::Deadline, &deadline);
-        env.storage()
-            .instance()
-            .set(&DataKey::MinContribution, &min_contribution);
-        env.storage().instance().set(&DataKey::TotalRaised, &0i128);
-        env.storage()
-            .instance()
-            .set(&DataKey::BonusGoalReachedEmitted, &false);
-        env.storage()
-            .instance()
-            .set(&DataKey::Status, &Status::Active);
-
-        let empty_contributors: Vec<Address> = Vec::new(&env);
-        env.storage()
-            .persistent()
-            .set(&DataKey::Contributors, &empty_contributors);
-
-        let empty_roadmap: Vec<RoadmapItem> = Vec::new(&env);
-        env.storage()
-            .instance()
-            .set(&DataKey::Roadmap, &empty_roadmap);
+        crate::crowdfund_initialize_function::validate_initialize_inputs(
+            goal,
+            min_contribution,
+            &platform_config,
+            bonus_goal,
+            &bonus_goal_description,
+        );
+        crate::crowdfund_initialize_function::persist_initialize_state(
+            &env,
+            &admin,
+            &creator,
+            &token,
+            goal,
+            deadline,
+            min_contribution,
+            &platform_config,
+            bonus_goal,
+            &bonus_goal_description,
+        );
 
         Ok(())
     }

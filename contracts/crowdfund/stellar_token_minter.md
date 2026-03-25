@@ -282,6 +282,28 @@ pub struct CampaignStats {
 | 3 | `CampaignStillActive` | Action requires deadline to have passed |
 | 4 | `GoalNotReached` | Withdraw/collect attempted when goal not met |
 | 5 | `GoalReached` | Refund attempted when goal was met |
+
+## Testing and Security Notes
+
+- Test coverage target remains 95%+ lines in the crowdfund module.
+- Critical code paths covered:
+  - `initialize`: repeated init, platform fee bounds, bonus goal guard.
+  - `contribute`: minimum amount guard, deadline guard, aggregation, overflow protection.
+  - `pledge` / `collect_pledges`: state transition and transfer effect.
+  - `withdraw`: deadline, goal check, platform fee, NFT mint flow.
+  - `refund`, `cancel`, `add_roadmap_item`, `add_stretch_goal`, `current_milestone`, `get_stats`, `bonus_goal`.
+  - `upgrade`: admin-only authorization.
+  - `stellar_token_minter.test.rs`: explicit security/readability tests for
+    deadline guards, goal guards, bonus-goal capping, and upgrade auth.
+
+### Security assumptions
+
+1. `creator.require_auth()` and `admin.require_auth()` provide access control in relevant calls.
+2. `platform fee <= 10_000` ensures no more than 100% fees are taken.
+3. `bonus_goal` strict comparison (`> goal`) prevents invalid secondary goal loops.
+4. `contribute` and `collect_pledges` use `checked_add`/`checked_mul` to avoid overflow in numeric operations.
+5. `status` checks in state-transition functions prevent replay / double accounting.
+
 | 6 | `Overflow` | Integer overflow in contribution accounting |
 | 7 | `NothingToRefund` | Caller has no contribution to refund |
 | 8 | `ZeroAmount` | Contribution amount is zero |
@@ -328,6 +350,10 @@ Tests live in:
 - `contracts/crowdfund/src/stellar_token_minter_test.rs` — logging bounds and minter edge cases
 
 ### stellar_token_minter_test coverage
+- `contracts/crowdfund/src/test.rs` (functional)
+- `contracts/crowdfund/src/auth_tests.rs` (authorization)
+- `contracts/crowdfund/src/stellar_token_minter_test.rs` (minter-focused
+  security/readability edge cases)
 
 | Area | Tests |
 |---|---|
@@ -344,6 +370,19 @@ Tests live in:
 | Contribute guards | BelowMinimum, CampaignEnded, ZeroAmount |
 | collect_pledges guards | CampaignStillActive, GoalNotReached |
 | get_stats | empty campaign zeroes, accurate aggregates after contributions |
+
+### Latest token-minter focused test execution
+
+Run command:
+
+```bash
+cargo test --package crowdfund stellar_token_minter_test
+```
+
+Security notes validated by this suite:
+- Deadline/goal gates prevent premature or invalid `collect_pledges`.
+- Upgrade remains admin-gated.
+- Bonus-goal progress is capped at 10,000 bps (100%) for UI safety.
 
 Run with:
 
