@@ -19,8 +19,9 @@ Thumbs.db
 *.wasm
 !contracts/factory/wasm/crowdfund.wasm
 
-# Kiro
-.kiro/
+# Kiro (local settings only, specs are tracked)
+.kiro/settings/
+.kiro/hooks/
 
 # Test artifacts
 contracts/*/test_snapshots/

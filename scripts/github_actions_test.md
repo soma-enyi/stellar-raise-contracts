@@ -64,13 +64,42 @@ subcommands (`soroban keys`, `soroban contract`) were updated to `stellar`.
 **Fix:** Changed `cargo install soroban-cli` → `cargo install stellar-cli` and
 updated all `soroban` command invocations to `stellar`.
 
+### 6. `rust_ci.yml` — no frontend UI test job
+
+The CI pipeline had no job to run Jest tests for the frontend. Frontend
+regressions could merge undetected.
+
+**Fix:** Added a `frontend` job that runs in parallel with the Rust `check` job:
+
+```yaml
+frontend:
+  name: Frontend UI Tests
+  runs-on: ubuntu-latest
+  steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-node@v4
+      with:
+        node-version: "20"
+        cache: "npm"          # caches node_modules between runs
+    - run: npm ci
+    - run: npm run test:coverage -- --ci --reporters=default
+```
+
+Key speed optimisations:
+- `cache: "npm"` in `setup-node` restores `~/.npm` automatically — no manual
+  `actions/cache` step needed.
+- Runs in parallel with the Rust job, so it adds zero wall-clock time to the
+  pipeline on a typical PR.
+- `--ci` flag disables interactive watch mode and fails fast on any test
+  failure.
+
 ---
 
 ## Files changed
 
 | File | Change |
 |---|---|
-| `.github/workflows/rust_ci.yml` | `checkout@v6` → `checkout@v4`; removed duplicate WASM build step |
+| `.github/workflows/rust_ci.yml` | `checkout@v6` → `checkout@v4`; removed duplicate WASM build step; added `frontend` job for UI tests |
 | `.github/workflows/testnet_smoke.yml` | `checkout@v6` → `checkout@v4`; added `-p crowdfund` to build step; `soroban-cli` → `stellar-cli`; all `soroban` commands → `stellar` |
 | `.github/workflows/spellcheck.yml` | Replaced empty file with working spellcheck workflow |
 
@@ -78,8 +107,8 @@ updated all `soroban` command invocations to `stellar`.
 
 | Script | Purpose |
 |---|---|
-| `scripts/github_actions_test.sh` | Validates workflow files in CI or locally (11 checks) |
-| `scripts/github_actions_test.test.sh` | Tests the validator against pass/fail scenarios (11 tests) |
+| `scripts/github_actions_test.sh` | Validates workflow files in CI or locally (8 checks) |
+| `scripts/github_actions_test.test.sh` | Tests the validator against pass/fail scenarios (9 tests) |
 
 Run locally:
 

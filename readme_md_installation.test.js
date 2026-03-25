@@ -151,6 +151,7 @@ describe('deploy.sh logging bounds', () => {
     const count = (src.match(/echo "\[LOG\]/g) || []).length;
     expect(count).toBeLessThanOrEqual(7);
   });
+});
 
   test('15 - deploy.sh step=done line includes contract_id field', () => {
     const src = fs.readFileSync(DEPLOY_SCRIPT, 'utf8');
@@ -180,6 +181,7 @@ describe('interact.sh logging bounds', () => {
     const parsed = parseLog(lines[0]);
     expect(parsed.reason).toBe('unknown_action');
   });
+});
 
   test('19 - interact.sh contribute action has exactly 2 [LOG] lines in source', () => {
     const src = fs.readFileSync(INTERACT_SCRIPT, 'utf8');

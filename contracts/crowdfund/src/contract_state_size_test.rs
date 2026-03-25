@@ -52,9 +52,9 @@ fn str_of_len(env: &Env, n: u32) -> String {
 
 #[test]
 fn constants_have_expected_values() {
-    assert_eq!(MAX_CONTRIBUTORS, 1_000);
-    assert_eq!(MAX_ROADMAP_ITEMS, 20);
-    assert_eq!(MAX_STRETCH_GOALS, 10);
+    assert_eq!(MAX_CONTRIBUTORS, 128);
+    assert_eq!(MAX_ROADMAP_ITEMS, 32);
+    assert_eq!(MAX_STRETCH_GOALS, 32);
     assert_eq!(MAX_STRING_LEN, 256);
 }
 

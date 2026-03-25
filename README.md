@@ -159,21 +159,25 @@ We provide automated scripts to simplify deploying and interacting with the crow
 
 #### Prerequisites
 
-1. **Install Soroban CLI:**
+1. **Install Stellar CLI (v20+):**
 
    ```bash
    curl -Ls https://soroban.stellar.org/install-soroban.sh | sh
+   source ~/.bashrc   # or ~/.zshrc
+   stellar --version  # should print stellar-cli x.y.z
    ```
 
-2. **Configure your Soroban identity:**
+2. **Configure your Stellar identity:**
 
    ```bash
-   soroban keys generate --global <alice>
+   stellar keys generate --global alice
    ```
 
 3. **Add the testnet network:**
    ```bash
-   soroban network add testnet --rpc-url https://soroban-testnet.stellar.org:443 --network-passphrase "Test SDF Network ; September 2015"
+   stellar network add testnet \
+     --rpc-url https://soroban-testnet.stellar.org:443 \
+     --network-passphrase "Test SDF Network ; September 2015"
    ```
 
 #### Deploy Script
@@ -249,14 +253,14 @@ If you prefer manual deployment:
 # Build the optimized WASM
 cargo build --release --target wasm32-unknown-unknown
 
-# Deploy using Soroban CLI
-soroban contract deploy \
+# Deploy using Stellar CLI
+stellar contract deploy \
   --wasm target/wasm32-unknown-unknown/release/crowdfund.wasm \
   --network testnet \
   --source <YOUR_SECRET_KEY>
 
 # Initialize the campaign
-soroban contract invoke \
+stellar contract invoke \
   --id <CONTRACT_ADDRESS> \
   --network testnet \
   --source <YOUR_SECRET_KEY> \
@@ -272,6 +276,68 @@ soroban contract invoke \
 ## Code of Conduct
 
 Please read our [Code of Conduct](CODE_OF_CONDUCT.md) before contributing.
+
+## Troubleshooting
+
+### WASM target missing
+
+```bash
+# Symptom: error[E0463]: can't find crate for `std`
+rustup target add wasm32-unknown-unknown
+rustup target list --installed | grep wasm32
+```
+
+### Stellar CLI not found or wrong version
+
+```bash
+# Symptom: stellar: command not found  OR  unexpected argument '--source-account'
+# The CLI was renamed from `soroban` to `stellar` in v20. Install the latest:
+curl -Ls https://soroban.stellar.org/install-soroban.sh | sh
+source ~/.bashrc   # or ~/.zshrc
+stellar --version  # should print stellar-cli x.y.z
+```
+
+### Testnet vs. Futurenet identity setup
+
+```bash
+# Generate a funded testnet identity (friendbot auto-funds on testnet)
+stellar keys generate --global alice --network testnet
+stellar keys address alice
+
+# For Futurenet (manual funding required):
+stellar network add futurenet \
+  --rpc-url https://rpc-futurenet.stellar.org:443 \
+  --network-passphrase "Test SDF Future Network ; October 2022"
+stellar keys generate --global alice-futurenet --network futurenet
+```
+
+> **Security**: Never commit `.soroban/` or `~/.config/stellar/` directories.
+> They contain plaintext secret keys. Add `.soroban/` to `.gitignore`.
+
+### cargo build fails after `rustup update`
+
+```bash
+rustup update stable
+rustup target add wasm32-unknown-unknown   # re-add after toolchain update
+cargo clean && cargo build --release --target wasm32-unknown-unknown
+```
+
+### cargo test hangs or times out
+
+Soroban tests spin up an in-process ledger. On machines with limited RAM,
+running all tests in parallel can exhaust memory.
+
+```bash
+# Limit test thread parallelism
+cargo test --workspace -- --test-threads=2
+```
+
+For a full edge-case checklist and automated environment verification, see
+[`docs/readme_md_installation.md`](docs/readme_md_installation.md) and run:
+
+```bash
+./scripts/verify_env.sh
+```
 
 ## Changelog
 
