@@ -779,3 +779,16 @@ fn test_add_roadmap_item() {
     assert_eq!(items.len(), 1);
     assert_eq!(items.get(0).unwrap().date, future_date);
 }
+
+// ── token_decimals ────────────────────────────────────────────────────────────
+
+/// token_decimals() returns the decimal precision stored at initialize time.
+#[test]
+fn test_token_decimals_stored_on_initialize() {
+    let (env, client, creator, token_address, _admin) = setup_env();
+    let deadline = env.ledger().timestamp() + 3600;
+    default_init(&client, &creator, &token_address, deadline);
+
+    // Stellar asset contracts report 7 decimals (stroops).
+    assert_eq!(client.token_decimals(), 7u32);
+}

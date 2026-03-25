@@ -172,6 +172,8 @@ pub enum DataKey {
     /// Platform fee configuration.
     PlatformConfig,
     NFTContract,
+    /// Decimal precision of the campaign token (e.g. 7 for XLM, 6 for USDC).
+    TokenDecimals,
 }
 
 // ── Contract Error ──────────────────────────────────────────────────────────
@@ -282,6 +284,12 @@ impl CrowdfundContract {
         if env.storage().instance().has(&DataKey::Creator) {
             return Err(ContractError::AlreadyInitialized);
         }
+
+        // Validate that `token` is a real SEP-41 contract by reading its decimals.
+        // This call will trap if the address does not implement the token interface,
+        // preventing campaigns from being initialized with arbitrary/invalid addresses.
+        let token_client = token::Client::new(&env, &token);
+        let token_decimals: u32 = token_client.decimals();
 
         creator.require_auth();
         crate::crowdfund_initialize_function::validate_initialize_inputs(
@@ -1254,6 +1262,18 @@ impl CrowdfundContract {
     /// Returns the token contract address used for contributions.
     pub fn token(env: Env) -> Address {
         env.storage().instance().get(&DataKey::Token).unwrap()
+    }
+
+    /// Returns the decimal precision of the campaign token.
+    ///
+    /// All goal and contribution amounts are expressed in the token's smallest
+    /// unit (e.g. stroops for XLM, micro-USDC for USDC). Use this value to
+    /// convert raw amounts to human-readable form: `amount / 10^decimals`.
+    pub fn token_decimals(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::TokenDecimals)
+            .unwrap()
     }
 
     /// Returns the configured NFT contract address, if any.
