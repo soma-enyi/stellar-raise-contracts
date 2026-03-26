@@ -59,4 +59,66 @@ mod tests {
         assert!(client.validate_metadata_aggregate(&limit));
         assert!(!client.validate_metadata_aggregate(&(limit + 1)));
     }
+
+    // ... (rest of the code remains the same)
+
+    // ── Pure helper tests ────────────────────────────────────────────────────────
+
+    #[test]
+    fn constants_have_expected_values() {
+        assert_eq!(MAX_CONTRIBUTORS, 128);
+        assert_eq!(MAX_PLEDGERS, 128);
+        assert_eq!(MAX_ROADMAP_ITEMS, 32);
+        assert_eq!(MAX_STRETCH_GOALS, 32);
+        assert_eq!(MAX_TITLE_LENGTH, 128);
+        assert_eq!(MAX_DESCRIPTION_LENGTH, 2_048);
+        assert_eq!(MAX_SOCIAL_LINKS_LENGTH, 512);
+        assert_eq!(MAX_BONUS_GOAL_DESCRIPTION_LENGTH, 280);
+        assert_eq!(MAX_ROADMAP_DESCRIPTION_LENGTH, 280);
+        assert_eq!(MAX_METADATA_TOTAL_LENGTH, 2_304);
+    }
+
+    // ... (rest of the code remains the same)
+
+    // ── Contract wiring tests ────────────────────────────────────────────────────
+
+    #[test]
+    fn initialize_accepts_bonus_goal_description_at_exact_limit() {
+        let (env, client, creator, token_address, _admin) = setup();
+        let deadline = env.ledger().timestamp() + 3_600;
+        let description = soroban_string(&env, MAX_BONUS_GOAL_DESCRIPTION_LENGTH, 'b');
+
+        client.initialize(
+            &creator,
+            &creator,
+            &token_address,
+            &1_000_000,
+            &deadline,
+            &1_000,
+            &None,
+            &Some(2_000_000),
+            &Some(description.clone()),
+        );
+
+        assert_eq!(client.bonus_goal_description(), Some(description));
+    }
+
+    // ... (rest of the code remains the same)
+
+    #[test]
+    #[should_panic(expected = "stretch goal limit exceeded")]
+    fn add_stretch_goal_rejects_when_capacity_full() {
+        let (env, client, creator, token_address, _admin) = setup();
+        let deadline = env.ledger().timestamp() + 3_600;
+        default_init(&client, &creator, &token_address, deadline);
+
+        env.as_contract(&client.address, || {
+            let stretch_goals = filled_stretch_goals(&env, MAX_STRETCH_GOALS);
+            env.storage()
+                .instance()
+                .set(&DataKey::StretchGoals, &stretch_goals);
+        });
+
+        client.add_stretch_goal(&9_999_999i128);
+    }
 }

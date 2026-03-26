@@ -301,33 +301,43 @@ describe("ReactSubmitButton accessibility", () => {
 // ── ReactSubmitButton — click handling ───────────────────────────────────────
 
 describe("ReactSubmitButton click handling", () => {
-  it("fires onClick in idle state", () => {
-    const onClick = jest.fn();
-    fireEvent.click(renderBtn({ onClick }));
+  it("fires onClick in idle state", async () => {
+    const onClick = jest.fn().mockResolvedValue(undefined);
+    const { container } = render(<ReactSubmitButton state="idle" onClick={onClick} />);
+    const btn = container.querySelector("button") as HTMLButtonElement;
+    await act(async () => { fireEvent.click(btn); });
     expect(onClick).toHaveBeenCalledTimes(1);
   });
 
-  it("fires onClick in error state (retry)", () => {
-    const onClick = jest.fn();
-    fireEvent.click(renderBtn({ state: "error", onClick }));
+  it("fires onClick in error state (retry)", async () => {
+    const onClick = jest.fn().mockResolvedValue(undefined);
+    const { container } = render(<ReactSubmitButton state="error" onClick={onClick} />);
+    const btn = container.querySelector("button") as HTMLButtonElement;
+    await act(async () => { fireEvent.click(btn); });
     expect(onClick).toHaveBeenCalledTimes(1);
   });
 
   it("does NOT fire onClick in submitting state", () => {
     const onClick = jest.fn();
-    fireEvent.click(renderBtn({ state: "submitting", onClick }));
+    act(() => {
+      fireEvent.click(renderBtn({ state: "submitting", onClick }));
+    });
     expect(onClick).not.toHaveBeenCalled();
   });
 
   it("does NOT fire onClick in disabled state", () => {
     const onClick = jest.fn();
-    fireEvent.click(renderBtn({ state: "disabled", onClick }));
+    act(() => {
+      fireEvent.click(renderBtn({ state: "disabled", onClick }));
+    });
     expect(onClick).not.toHaveBeenCalled();
   });
 
   it("does NOT fire onClick when disabled prop is true", () => {
     const onClick = jest.fn();
-    fireEvent.click(renderBtn({ disabled: true, onClick }));
+    act(() => {
+      fireEvent.click(renderBtn({ disabled: true, onClick }));
+    });
     expect(onClick).not.toHaveBeenCalled();
   });
 

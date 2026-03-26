@@ -13,11 +13,13 @@
 /// A goal of zero enables a trivial drain exploit; 1 closes that surface.
 pub const MIN_GOAL_AMOUNT: i128 = 1;
 
-/// Creates a new campaign with goal validation.
+/// @notice Minimum allowed `min_contribution` value in token units.
 ///
-/// # Parameters
-/// - creator: campaign owner
-/// - goal: funding target
+/// @dev    Prevents contributions of 0 tokens, which would allow an attacker
+///         to register as a contributor without transferring any value.
+pub const MIN_CONTRIBUTION_AMOUNT: i128 = 1;
+
+/// @notice Maximum allowed platform fee in basis points (100% = 10_000 bps).
 ///
 /// # Security
 /// Ensures goal meets minimum threshold and creator is authenticated.
@@ -56,8 +58,24 @@ pub fn validate_goal(goal: i128) -> Result<(), &'static str> {
     Ok(())
 }
 
-/// Validates that min_contribution meets the minimum floor.
-/// Returns Ok(()) if valid; Err(&'static str) otherwise.
+/// Validates that `min_contribution` meets the minimum floor.
+///
+/// ## Integer-overflow safety
+///
+/// The comparison `goal_amount < MIN_GOAL_AMOUNT` is a single signed integer
+/// comparison — no arithmetic is performed, so overflow is impossible.
+#[inline]
+pub fn validate_goal_amount(
+    _env: &soroban_sdk::Env,
+    goal_amount: i128,
+) -> Result<(), crate::ContractError> {
+    if goal_amount < MIN_GOAL_AMOUNT {
+        return Err(crate::ContractError::GoalTooLow);
+    }
+    Ok(())
+}
+
+/// Validates that `min_contribution` meets the minimum floor.
 #[inline]
 pub fn validate_min_contribution(min_contribution: i128) -> Result<(), &'static str> {
     if min_contribution < MIN_CONTRIBUTION_AMOUNT {
@@ -88,42 +106,27 @@ pub fn validate_platform_fee(fee_bps: u32) -> Result<(), &'static str> {
 
 // ── On-chain / typed-error validator ─────────────────────────────────────────
 
-/// Validates that goal_amount meets the minimum threshold.
-/// Returns ContractError::GoalTooLow when goal_amount < MIN_GOAL_AMOUNT.
+/// @notice Computes campaign funding progress in basis points.
 ///
-/// Security: A zero-goal campaign is immediately "successful" after any
-/// contribution, letting the creator drain funds with no real commitment.
-/// Integer-overflow safety: single signed comparison, no arithmetic.
-#[inline]
-pub fn validate_goal_amount(
-    _env: &soroban_sdk::Env,
-    goal_amount: i128,
-) -> Result<(), crate::ContractError> {
-    if goal_amount < MIN_GOAL_AMOUNT {
-        return Err(crate::ContractError::GoalTooLow);
-    }
-    Ok(())
-}
-
-/// Validates that `min_contribution` meets the minimum floor.
-pub const MIN_CONTRIBUTION_AMOUNT: i128 = 1;
-pub const MIN_GOAL_AMOUNT: i128 = 100;
-
+/// @dev    `progress_bps = (total_raised * PROGRESS_BPS_SCALE) / goal`.
+///         Result is capped at `MAX_PROGRESS_BPS` for over-funded campaigns.
+///         Returns 0 when `goal <= 0` to avoid division by zero.
+///
+/// @param  total_raised  Total tokens raised so far.
+/// @param  goal          Campaign funding goal.
+/// @return               Progress in basis points, capped at `MAX_PROGRESS_BPS`.
+///
+/// @custom:security Uses `saturating_mul` to prevent overflow on very large
+///         `total_raised` values. The cap ensures the return value is always
+///         in `[0, MAX_PROGRESS_BPS]`.
 #[inline]
 pub fn compute_progress_bps(total_raised: i128, goal: i128) -> u32 {
     if goal <= 0 {
         return 0;
     }
-    Ok(())
-}
-
-/// Validates if a goal meets the minimum threshold.
-///
-/// # Parameters
-/// - goal: the proposed goal
-///
-/// # Returns
-/// true if the goal is secure and valid.
-pub fn validate_goal(goal: u64) -> bool {
-    goal >= MIN_CAMPAIGN_GOAL
+    let raw = total_raised.saturating_mul(PROGRESS_BPS_SCALE) / goal;
+    if raw >= PROGRESS_BPS_SCALE {
+        return MAX_PROGRESS_BPS;
+    }
+    raw.max(0) as u32
 }

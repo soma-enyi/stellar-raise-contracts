@@ -7,14 +7,16 @@
 //!          scripts can map raw codes to human-readable descriptions without
 //!          embedding magic numbers.
 //!
-//! | Code | Variant              | Trigger                                         |
-//! |------|----------------------|-------------------------------------------------|
-//! |  2   | `CampaignEnded`      | `ledger.timestamp > deadline`                   |
-//! |  6   | `Overflow`           | contribution or total_raised would overflow     |
-//! |  8   | `ZeroAmount`         | `amount == 0`                                   |
-//! |  9   | `BelowMinimum`       | `amount < min_contribution`                     |
-//! | 10   | `CampaignNotActive`  | campaign status is not `Active`                 |
-//! | 11   | `NegativeAmount`     | `amount < 0`                                    |
+//! # Error taxonomy for `contribute()`
+//!
+//! | Code | Variant              | Trigger                                          |
+//! |------|----------------------|--------------------------------------------------|
+//! |  2   | `CampaignEnded`      | `ledger.timestamp > deadline`                    |
+//! |  6   | `Overflow`           | contribution or total_raised would overflow      |
+//! |  8   | `ZeroAmount`         | `amount == 0`                                    |
+//! |  9   | `BelowMinimum`       | `amount < min_contribution`                      |
+//! | 10   | `CampaignNotActive`  | campaign status is not `Active`                  |
+//! | 11   | `NegativeAmount`     | `amount < 0`                                     |
 //!
 //! # Security assumptions
 //!

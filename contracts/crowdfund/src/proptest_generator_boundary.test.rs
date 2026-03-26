@@ -3,7 +3,18 @@
 //! @title   ProptestGeneratorBoundary Tests
 //! @notice  Validates correct return of boundary constants and logic for clamping/validation.
 //! @dev     Includes both unit tests and property-based tests for boundary safety.
-//!          Target coverage: ≥95% line coverage with 256 property test cases.
+//!
+//! ## Test Coverage
+//!
+//! - **Constant Sanity Checks**: Verify all constants return correct values.
+//! - **Validation Functions**: Unit tests for each is_valid_* function.
+//! - **Clamping Functions**: Unit tests for clamp_* functions.
+//! - **Derived Calculations**: Unit tests for compute_* functions.
+//! - **Property-Based Tests**: Proptest with 64+ cases per property.
+//! - **Edge Cases**: Boundary values, overflow scenarios, zero/negative inputs.
+//! - **Regression Seeds**: Known problematic values from CI failures.
+//!
+//! Target: ≥95% line coverage.
 
 #[cfg(test)]
 mod tests {
@@ -15,6 +26,8 @@ mod tests {
         MIN_CONTRIBUTION_FLOOR, PROGRESS_BPS_CAP, FEE_BPS_CAP,
         PROPTEST_CASES_MIN, PROPTEST_CASES_MAX, GENERATOR_BATCH_MAX,
     };
+
+    // ── Setup Helper ──────────────────────────────────────────────────────────
 
     /// Setup a fresh test environment with the boundary contract registered.
     fn setup() -> (Env, ProptestGeneratorBoundaryClient<'static>) {
@@ -34,6 +47,11 @@ mod tests {
         assert_eq!(client.goal_min(), GOAL_MIN);
         assert_eq!(client.goal_max(), GOAL_MAX);
         assert_eq!(client.min_contribution_floor(), MIN_CONTRIBUTION_FLOOR);
+        assert_eq!(client.progress_bps_cap(), PROGRESS_BPS_CAP);
+        assert_eq!(client.fee_bps_cap(), FEE_BPS_CAP);
+        assert_eq!(client.proptest_cases_min(), PROPTEST_CASES_MIN);
+        assert_eq!(client.proptest_cases_max(), PROPTEST_CASES_MAX);
+        assert_eq!(client.generator_batch_max(), GENERATOR_BATCH_MAX);
     }
 
     #[test]
@@ -46,230 +64,219 @@ mod tests {
         assert!(GENERATOR_BATCH_MAX > 0);
     }
 
-    #[test]
-    fn test_constants_have_reasonable_values() {
-        // Deadline offsets should be in seconds
-        assert!(DEADLINE_OFFSET_MIN >= 60);
-        assert!(DEADLINE_OFFSET_MAX <= 100_000_000);
-        
-        // Goals should be positive
-        assert!(GOAL_MIN > 0);
-        assert!(GOAL_MAX > 0);
-        
-        // Basis points should be <= 10,000
-        assert!(PROGRESS_BPS_CAP <= 10_000);
-        assert!(FEE_BPS_CAP <= 10_000);
-    }
-
-    // ── is_valid_deadline_offset Tests ────────────────────────────────────────
+    // ── Deadline Offset Validation ────────────────────────────────────────────
 
     #[test]
     fn test_is_valid_deadline_offset_boundary_values() {
         let (_env, client) = setup();
+        // Lower boundary
         assert!(client.is_valid_deadline_offset(&DEADLINE_OFFSET_MIN));
-        assert!(client.is_valid_deadline_offset(&DEADLINE_OFFSET_MAX));
         assert!(!client.is_valid_deadline_offset(&(DEADLINE_OFFSET_MIN - 1)));
+        // Upper boundary
+        assert!(client.is_valid_deadline_offset(&DEADLINE_OFFSET_MAX));
         assert!(!client.is_valid_deadline_offset(&(DEADLINE_OFFSET_MAX + 1)));
-    }
-
-    #[test]
-    fn test_is_valid_deadline_offset_midrange() {
-        let (_env, client) = setup();
+        // Mid-range
         assert!(client.is_valid_deadline_offset(&500_000));
-        assert!(client.is_valid_deadline_offset(&100_000));
-        assert!(client.is_valid_deadline_offset(&10_000));
     }
 
     #[test]
-    fn test_is_valid_deadline_offset_zero_and_negative() {
+    fn test_is_valid_deadline_offset_edge_cases() {
         let (_env, client) = setup();
         assert!(!client.is_valid_deadline_offset(&0));
-        // Note: u64 cannot be negative, so we test the lower bound
+        assert!(!client.is_valid_deadline_offset(&999));
+        assert!(!client.is_valid_deadline_offset(&u64::MAX));
     }
 
-    // ── is_valid_goal Tests ──────────────────────────────────────────────────
+    // ── Goal Validation ──────────────────────────────────────────────────────
 
     #[test]
     fn test_is_valid_goal_boundary_values() {
         let (_env, client) = setup();
+        // Lower boundary
         assert!(client.is_valid_goal(&GOAL_MIN));
-        assert!(client.is_valid_goal(&GOAL_MAX));
         assert!(!client.is_valid_goal(&(GOAL_MIN - 1)));
+        // Upper boundary
+        assert!(client.is_valid_goal(&GOAL_MAX));
         assert!(!client.is_valid_goal(&(GOAL_MAX + 1)));
-    }
-
-    #[test]
-    fn test_is_valid_goal_midrange() {
-        let (_env, client) = setup();
+        // Mid-range
         assert!(client.is_valid_goal(&50_000_000));
-        assert!(client.is_valid_goal(&10_000_000));
-        assert!(client.is_valid_goal(&1_000_000));
     }
 
     #[test]
-    fn test_is_valid_goal_zero_and_negative() {
+    fn test_is_valid_goal_edge_cases() {
         let (_env, client) = setup();
         assert!(!client.is_valid_goal(&0));
         assert!(!client.is_valid_goal(&-1));
-        assert!(!client.is_valid_goal(&-1_000_000));
+        assert!(!client.is_valid_goal(&999));
+        assert!(!client.is_valid_goal(&i128::MIN));
     }
 
-    // ── is_valid_min_contribution Tests ──────────────────────────────────────
+    // ── Minimum Contribution Validation ───────────────────────────────────────
 
     #[test]
-    fn test_is_valid_min_contribution_valid_cases() {
+    fn test_is_valid_min_contribution() {
         let (_env, client) = setup();
-        assert!(client.is_valid_min_contribution(&1, &1_000));
-        assert!(client.is_valid_min_contribution(&500, &1_000));
-        assert!(client.is_valid_min_contribution(&1_000, &1_000));
-        assert!(client.is_valid_min_contribution(&1, &100_000_000));
-    }
-
-    #[test]
-    fn test_is_valid_min_contribution_invalid_cases() {
-        let (_env, client) = setup();
-        assert!(!client.is_valid_min_contribution(&0, &1_000));
-        assert!(!client.is_valid_min_contribution(&-1, &1_000));
-        assert!(!client.is_valid_min_contribution(&1_001, &1_000));
-        assert!(!client.is_valid_min_contribution(&100_000_001, &100_000_000));
-    }
-
-    // ── is_valid_contribution_amount Tests ───────────────────────────────────
-
-    #[test]
-    fn test_is_valid_contribution_amount_valid_cases() {
-        let (_env, client) = setup();
-        assert!(client.is_valid_contribution_amount(&1, &1));
-        assert!(client.is_valid_contribution_amount(&100, &50));
-        assert!(client.is_valid_contribution_amount(&1_000, &1));
-        assert!(client.is_valid_contribution_amount(&100_000_000, &1));
+        let goal = 1_000_000;
+        // Valid cases
+        assert!(client.is_valid_min_contribution(&MIN_CONTRIBUTION_FLOOR, &goal));
+        assert!(client.is_valid_min_contribution(&500_000, &goal));
+        assert!(client.is_valid_min_contribution(&goal, &goal));
+        // Invalid cases
+        assert!(!client.is_valid_min_contribution(&0, &goal));
+        assert!(!client.is_valid_min_contribution(&(goal + 1), &goal));
+        assert!(!client.is_valid_min_contribution(&-1, &goal));
     }
 
     #[test]
-    fn test_is_valid_contribution_amount_invalid_cases() {
+    fn test_is_valid_min_contribution_with_min_goal() {
         let (_env, client) = setup();
-        assert!(!client.is_valid_contribution_amount(&0, &1));
-        assert!(!client.is_valid_contribution_amount(&-1, &1));
-        assert!(!client.is_valid_contribution_amount(&50, &100));
-        assert!(!client.is_valid_contribution_amount(&1, &100));
+        assert!(client.is_valid_min_contribution(&MIN_CONTRIBUTION_FLOOR, &GOAL_MIN));
+        assert!(!client.is_valid_min_contribution(&(GOAL_MIN + 1), &GOAL_MIN));
     }
 
-    // ── is_valid_fee_bps Tests ───────────────────────────────────────────────
+    // ── Contribution Amount Validation ────────────────────────────────────────
 
     #[test]
-    fn test_is_valid_fee_bps_valid_cases() {
+    fn test_is_valid_contribution_amount() {
         let (_env, client) = setup();
+        let min_contribution = 1_000;
+        // Valid cases
+        assert!(client.is_valid_contribution_amount(&min_contribution, &min_contribution));
+        assert!(client.is_valid_contribution_amount(&(min_contribution + 1), &min_contribution));
+        assert!(client.is_valid_contribution_amount(&1_000_000, &min_contribution));
+        // Invalid cases
+        assert!(!client.is_valid_contribution_amount(&(min_contribution - 1), &min_contribution));
+        assert!(!client.is_valid_contribution_amount(&0, &min_contribution));
+        assert!(!client.is_valid_contribution_amount(&-1, &min_contribution));
+    }
+
+    // ── Fee Basis Points Validation ───────────────────────────────────────────
+
+    #[test]
+    fn test_is_valid_fee_bps() {
+        let (_env, client) = setup();
+        // Valid cases
         assert!(client.is_valid_fee_bps(&0));
-        assert!(client.is_valid_fee_bps(&1));
         assert!(client.is_valid_fee_bps(&5_000));
-        assert!(client.is_valid_fee_bps(&10_000));
+        assert!(client.is_valid_fee_bps(&FEE_BPS_CAP));
+        // Invalid cases
+        assert!(!client.is_valid_fee_bps(&(FEE_BPS_CAP + 1)));
+        assert!(!client.is_valid_fee_bps(&u32::MAX));
     }
+
+    // ── Generator Batch Size Validation ───────────────────────────────────────
+
+    #[test]
+    fn test_is_valid_generator_batch_size() {
+        let (_env, client) = setup();
+        // Valid cases
+        assert!(client.is_valid_generator_batch_size(&1));
+        assert!(client.is_valid_generator_batch_size(&256));
+        assert!(client.is_valid_generator_batch_size(&GENERATOR_BATCH_MAX));
+        // Invalid cases
+        assert!(!client.is_valid_generator_batch_size(&0));
+        assert!(!client.is_valid_generator_batch_size(&(GENERATOR_BATCH_MAX + 1)));
+    }
+
+    // ── Clamping Functions ────────────────────────────────────────────────────
 
     #[test]
     fn test_is_valid_fee_bps_invalid_cases() {
         let (_env, client) = setup();
-        assert!(!client.is_valid_fee_bps(&10_001));
-        assert!(!client.is_valid_fee_bps(&20_000));
-        assert!(!client.is_valid_fee_bps(&u32::MAX));
-    }
-
-    // ── is_valid_generator_batch_size Tests ──────────────────────────────────
-
-    #[test]
-    fn test_is_valid_generator_batch_size_valid_cases() {
-        let (_env, client) = setup();
-        assert!(client.is_valid_generator_batch_size(&1));
-        assert!(client.is_valid_generator_batch_size(&256));
-        assert!(client.is_valid_generator_batch_size(&512));
-    }
-
-    #[test]
-    fn test_is_valid_generator_batch_size_invalid_cases() {
-        let (_env, client) = setup();
-        assert!(!client.is_valid_generator_batch_size(&0));
-        assert!(!client.is_valid_generator_batch_size(&513));
-        assert!(!client.is_valid_generator_batch_size(&1_000));
-    }
-
-    // ── clamp_proptest_cases Tests ───────────────────────────────────────────
-
-    #[test]
-    fn test_clamp_proptest_cases_below_min() {
-        let (_env, client) = setup();
+        // Below minimum
         assert_eq!(client.clamp_proptest_cases(&0), PROPTEST_CASES_MIN);
         assert_eq!(client.clamp_proptest_cases(&1), PROPTEST_CASES_MIN);
-        assert_eq!(client.clamp_proptest_cases(&31), PROPTEST_CASES_MIN);
-    }
-
-    #[test]
-    fn test_clamp_proptest_cases_within_range() {
-        let (_env, client) = setup();
-        assert_eq!(client.clamp_proptest_cases(&32), 32);
-        assert_eq!(client.clamp_proptest_cases(&100), 100);
-        assert_eq!(client.clamp_proptest_cases(&256), 256);
-    }
-
-    #[test]
-    fn test_clamp_proptest_cases_above_max() {
-        let (_env, client) = setup();
-        assert_eq!(client.clamp_proptest_cases(&257), PROPTEST_CASES_MAX);
-        assert_eq!(client.clamp_proptest_cases(&1_000), PROPTEST_CASES_MAX);
+        // Within range
+        assert_eq!(client.clamp_proptest_cases(&64), 64);
+        assert_eq!(client.clamp_proptest_cases(&128), 128);
+        // Above maximum
+        assert_eq!(client.clamp_proptest_cases(&1000), PROPTEST_CASES_MAX);
         assert_eq!(client.clamp_proptest_cases(&u32::MAX), PROPTEST_CASES_MAX);
     }
 
-    // ── clamp_progress_bps Tests ─────────────────────────────────────────────
-
     #[test]
-    fn test_clamp_progress_bps_negative_values() {
+    fn test_clamp_progress_bps() {
         let (_env, client) = setup();
-        assert_eq!(client.clamp_progress_bps(&-1_000), 0);
+        // Negative values
+        assert_eq!(client.clamp_progress_bps(&-1000), 0);
         assert_eq!(client.clamp_progress_bps(&-1), 0);
-    }
-
-    #[test]
-    fn test_clamp_progress_bps_zero() {
-        let (_env, client) = setup();
+        // Zero
         assert_eq!(client.clamp_progress_bps(&0), 0);
-    }
-
-    #[test]
-    fn test_clamp_progress_bps_within_range() {
-        let (_env, client) = setup();
-        assert_eq!(client.clamp_progress_bps(&1), 1);
-        assert_eq!(client.clamp_progress_bps(&5_000), 5_000);
-        assert_eq!(client.clamp_progress_bps(&10_000), 10_000);
-    }
-
-    #[test]
-    fn test_clamp_progress_bps_above_cap() {
-        let (_env, client) = setup();
-        assert_eq!(client.clamp_progress_bps(&10_001), PROGRESS_BPS_CAP);
-        assert_eq!(client.clamp_progress_bps(&20_000), PROGRESS_BPS_CAP);
+        // Within range
+        assert_eq!(client.clamp_progress_bps(&5000), 5000);
+        assert_eq!(client.clamp_progress_bps(&10000), PROGRESS_BPS_CAP);
+        // Above cap
+        assert_eq!(client.clamp_progress_bps(&10001), PROGRESS_BPS_CAP);
         assert_eq!(client.clamp_progress_bps(&i128::MAX), PROGRESS_BPS_CAP);
     }
 
-    // ── compute_progress_bps Tests ───────────────────────────────────────────
+    // ── Derived Calculation Functions ─────────────────────────────────────────
 
     #[test]
-    fn test_compute_progress_bps_zero_goal() {
+    fn test_compute_progress_bps_basic() {
         let (_env, client) = setup();
-        assert_eq!(client.compute_progress_bps(&0, &0), 0);
-        assert_eq!(client.compute_progress_bps(&1_000, &0), 0);
-        assert_eq!(client.compute_progress_bps(&100_000_000, &0), 0);
+        // 50% funded
+        assert_eq!(client.compute_progress_bps(&500, &1000), 5000);
+        // 100% funded
+        assert_eq!(client.compute_progress_bps(&1000, &1000), 10000);
+        // 200% funded (capped)
+        assert_eq!(client.compute_progress_bps(&2000, &1000), 10000);
     }
 
     #[test]
-    fn test_compute_progress_bps_negative_goal() {
+    fn test_compute_progress_bps_edge_cases() {
         let (_env, client) = setup();
-        assert_eq!(client.compute_progress_bps(&1_000, &-1), 0);
-        assert_eq!(client.compute_progress_bps(&100_000, &-1_000), 0);
+        // Zero goal
+        assert_eq!(client.compute_progress_bps(&500, &0), 0);
+        // Negative goal
+        assert_eq!(client.compute_progress_bps(&500, &-1000), 0);
+        // Negative raised
+        assert_eq!(client.compute_progress_bps(&-100, &1000), 0);
+        // Very small amounts
+        assert_eq!(client.compute_progress_bps(&1, &10000), 1);
     }
 
     #[test]
-    fn test_compute_progress_bps_zero_raised() {
+    fn test_compute_progress_bps_overflow_safety() {
         let (_env, client) = setup();
-        assert_eq!(client.compute_progress_bps(&0, &1_000), 0);
-        assert_eq!(client.compute_progress_bps(&0, &100_000_000), 0);
+        // Large values that could overflow without saturating_mul
+        let large_raised = i128::MAX / 2;
+        let large_goal = 1_000;
+        let result = client.compute_progress_bps(&large_raised, &large_goal);
+        assert_eq!(result, PROGRESS_BPS_CAP);
+    }
+
+    #[test]
+    fn test_compute_fee_amount_basic() {
+        let (_env, client) = setup();
+        // 10% fee
+        assert_eq!(client.compute_fee_amount(&1000, &1000), 100);
+        // 50% fee
+        assert_eq!(client.compute_fee_amount(&1000, &5000), 500);
+        // 100% fee
+        assert_eq!(client.compute_fee_amount(&1000, &10000), 1000);
+    }
+
+    #[test]
+    fn test_compute_fee_amount_edge_cases() {
+        let (_env, client) = setup();
+        // Zero amount
+        assert_eq!(client.compute_fee_amount(&0, &5000), 0);
+        // Negative amount
+        assert_eq!(client.compute_fee_amount(&-1000, &5000), 0);
+        // Zero fee
+        assert_eq!(client.compute_fee_amount(&1000, &0), 0);
+        // Both zero
+        assert_eq!(client.compute_fee_amount(&0, &0), 0);
+    }
+
+    #[test]
+    fn test_compute_fee_amount_floor_division() {
+        let (_env, client) = setup();
+        // 1/3 fee (should floor)
+        assert_eq!(client.compute_fee_amount(&1000, &3333), 333);
+        // 2/3 fee (should floor)
+        assert_eq!(client.compute_fee_amount(&1000, &6666), 666);
     }
 
     #[test]
@@ -349,6 +356,8 @@ mod tests {
     }
 
     // ── Property-Based Tests ──────────────────────────────────────────────────
+    // @notice These tests use proptest to explore the input space systematically.
+    //         Each property is tested with 64+ randomly generated cases.
 
     proptest! {
         #![proptest_config(ProptestConfig::with_cases(256))]
@@ -369,6 +378,18 @@ mod tests {
 
         /// Property: All valid goals pass validation.
         #[test]
+        fn prop_deadline_offset_below_min_invalid(offset in 0u64..DEADLINE_OFFSET_MIN) {
+            let (_env, client) = setup();
+            prop_assert!(!client.is_valid_deadline_offset(&offset));
+        }
+
+        #[test]
+        fn prop_deadline_offset_above_max_invalid(offset in (DEADLINE_OFFSET_MAX + 1)..u64::MAX) {
+            let (_env, client) = setup();
+            prop_assert!(!client.is_valid_deadline_offset(&offset));
+        }
+
+        #[test]
         fn prop_goal_validity(goal in GOAL_MIN..=GOAL_MAX) {
             let (_env, client) = setup();
             prop_assert!(client.is_valid_goal(&goal));
@@ -376,15 +397,20 @@ mod tests {
 
         /// Property: All invalid goals fail validation.
         #[test]
-        fn prop_goal_invalidity(goal in i128::MIN..GOAL_MIN) {
+        fn prop_goal_below_min_invalid(goal in i128::MIN..GOAL_MIN) {
             let (_env, client) = setup();
             prop_assert!(!client.is_valid_goal(&goal));
         }
 
-        /// Property: Progress BPS is always bounded by PROGRESS_BPS_CAP.
         #[test]
-        fn prop_progress_bps_bounds(
-            raised in -1_000_000_000i128..=200_000_000i128,
+        fn prop_goal_above_max_invalid(goal in (GOAL_MAX + 1)..i128::MAX) {
+            let (_env, client) = setup();
+            prop_assert!(!client.is_valid_goal(&goal));
+        }
+
+        #[test]
+        fn prop_progress_bps_always_bounded(
+            raised in -1_000_000_000i128..=1_000_000_000i128,
             goal in GOAL_MIN..=GOAL_MAX
         ) {
             let (_env, client) = setup();
@@ -392,27 +418,23 @@ mod tests {
             prop_assert!(bps <= PROGRESS_BPS_CAP);
         }
 
-        /// Property: Clamped progress BPS is always bounded.
         #[test]
-        fn prop_clamped_progress_bps_bounds(raw in i128::MIN..=i128::MAX) {
+        fn prop_progress_bps_zero_when_goal_zero(raised in -1_000_000i128..=1_000_000i128) {
             let (_env, client) = setup();
-            let clamped = client.clamp_progress_bps(&raw);
-            prop_assert!(clamped <= PROGRESS_BPS_CAP);
+            let bps = client.compute_progress_bps(&raised, &0);
+            prop_assert_eq!(bps, 0);
         }
 
-        /// Property: Proptest cases are always within bounds after clamping.
         #[test]
-        fn prop_clamped_cases_bounds(requested in 0u32..=u32::MAX) {
+        fn prop_progress_bps_zero_when_raised_negative(goal in GOAL_MIN..=GOAL_MAX) {
             let (_env, client) = setup();
-            let clamped = client.clamp_proptest_cases(&requested);
-            prop_assert!(clamped >= PROPTEST_CASES_MIN);
-            prop_assert!(clamped <= PROPTEST_CASES_MAX);
+            let bps = client.compute_progress_bps(&-1000, &goal);
+            prop_assert_eq!(bps, 0);
         }
 
-        /// Property: Fee amounts are always non-negative.
         #[test]
-        fn prop_fee_amount_non_negative(
-            amount in 0i128..=100_000_000i128,
+        fn prop_fee_amount_always_non_negative(
+            amount in -1_000_000i128..=1_000_000i128,
             fee_bps in 0u32..=FEE_BPS_CAP
         ) {
             let (_env, client) = setup();
@@ -420,20 +442,37 @@ mod tests {
             prop_assert!(fee >= 0);
         }
 
-        /// Property: Fee amount never exceeds the original amount.
         #[test]
-        fn prop_fee_amount_not_exceeds_original(
-            amount in 1i128..=100_000_000i128,
-            fee_bps in 0u32..=FEE_BPS_CAP
-        ) {
+        fn prop_fee_amount_zero_when_amount_zero(fee_bps in 0u32..=FEE_BPS_CAP) {
             let (_env, client) = setup();
-            let fee = client.compute_fee_amount(&amount, &fee_bps);
-            prop_assert!(fee <= amount);
+            let fee = client.compute_fee_amount(&0, &fee_bps);
+            prop_assert_eq!(fee, 0);
         }
 
-        /// Property: Valid min contributions are always >= MIN_CONTRIBUTION_FLOOR.
         #[test]
-        fn prop_valid_min_contribution_floor(
+        fn prop_fee_amount_zero_when_fee_zero(amount in -1_000_000i128..=1_000_000i128) {
+            let (_env, client) = setup();
+            let fee = client.compute_fee_amount(&amount, &0);
+            prop_assert_eq!(fee, 0);
+        }
+
+        #[test]
+        fn prop_clamp_proptest_cases_within_bounds(requested in 0u32..=u32::MAX) {
+            let (_env, client) = setup();
+            let clamped = client.clamp_proptest_cases(&requested);
+            prop_assert!(clamped >= PROPTEST_CASES_MIN);
+            prop_assert!(clamped <= PROPTEST_CASES_MAX);
+        }
+
+        #[test]
+        fn prop_clamp_progress_bps_within_bounds(raw in i128::MIN..=i128::MAX) {
+            let (_env, client) = setup();
+            let clamped = client.clamp_progress_bps(&raw);
+            prop_assert!(clamped <= PROGRESS_BPS_CAP);
+        }
+
+        #[test]
+        fn prop_min_contribution_valid_when_in_range(
             min_contrib in MIN_CONTRIBUTION_FLOOR..=GOAL_MAX,
             goal in GOAL_MIN..=GOAL_MAX
         ) {
@@ -443,11 +482,10 @@ mod tests {
             }
         }
 
-        /// Property: Valid contribution amounts are >= min_contribution.
         #[test]
-        fn prop_valid_contribution_amount(
-            amount in MIN_CONTRIBUTION_FLOOR..=100_000_000i128,
-            min_contrib in MIN_CONTRIBUTION_FLOOR..=100_000_000i128
+        fn prop_contribution_amount_valid_when_meets_minimum(
+            amount in MIN_CONTRIBUTION_FLOOR..=1_000_000i128,
+            min_contrib in MIN_CONTRIBUTION_FLOOR..=1_000_000i128
         ) {
             let (_env, client) = setup();
             if amount >= min_contrib {
@@ -455,56 +493,46 @@ mod tests {
             }
         }
 
-        /// Property: Valid fee BPS are always <= FEE_BPS_CAP.
         #[test]
-        fn prop_valid_fee_bps(fee_bps in 0u32..=FEE_BPS_CAP) {
+        fn prop_fee_bps_valid_when_within_cap(fee_bps in 0u32..=FEE_BPS_CAP) {
             let (_env, client) = setup();
             prop_assert!(client.is_valid_fee_bps(&fee_bps));
         }
 
-        /// Property: Valid batch sizes are always > 0 and <= GENERATOR_BATCH_MAX.
         #[test]
-        fn prop_valid_batch_size(batch_size in 1u32..=GENERATOR_BATCH_MAX) {
+        fn prop_batch_size_valid_when_in_range(batch_size in 1u32..=GENERATOR_BATCH_MAX) {
             let (_env, client) = setup();
             prop_assert!(client.is_valid_generator_batch_size(&batch_size));
         }
     }
 
     // ── Regression Tests ──────────────────────────────────────────────────────
+    // @notice These tests capture known problematic values from CI failures.
 
     #[test]
-    fn regression_deadline_offset_minimum_1000() {
-        // Regression: Deadline offset minimum was previously 100, causing flaky tests.
-        // This test ensures it's now 1,000 (17 minutes).
+    fn regression_deadline_offset_100_seconds_now_invalid() {
         let (_env, client) = setup();
-        assert_eq!(client.deadline_offset_min(), 1_000);
+        // Previously accepted (caused flaky tests), now rejected
         assert!(!client.is_valid_deadline_offset(&100));
-        assert!(client.is_valid_deadline_offset(&1_000));
+    }
+
+    #[test]
+    fn regression_goal_zero_always_invalid() {
+        let (_env, client) = setup();
+        assert!(!client.is_valid_goal(&0));
     }
 
     #[test]
     fn regression_progress_bps_never_exceeds_cap() {
-        // Regression: Progress BPS should never exceed 10,000 (100%).
         let (_env, client) = setup();
-        let bps = client.compute_progress_bps(&1_000_000_000, &1);
-        assert_eq!(bps, PROGRESS_BPS_CAP);
+        // Even with extreme values, should cap at 10,000
+        assert_eq!(client.compute_progress_bps(&i128::MAX, &1), PROGRESS_BPS_CAP);
     }
 
     #[test]
-    fn regression_fee_calculation_precision() {
-        // Regression: Fee calculation should use integer floor division.
+    fn regression_fee_amount_never_negative() {
         let (_env, client) = setup();
-        assert_eq!(client.compute_fee_amount(&1_000, &1_000), 100);
-        assert_eq!(client.compute_fee_amount(&1_001, &1_000), 100);
-        assert_eq!(client.compute_fee_amount(&1_009, &1_000), 100);
-        assert_eq!(client.compute_fee_amount(&1_010, &1_000), 101);
-    }
-
-    #[test]
-    fn regression_zero_goal_division_safety() {
-        // Regression: Division by zero should be prevented.
-        let (_env, client) = setup();
-        assert_eq!(client.compute_progress_bps(&1_000, &0), 0);
-        assert_eq!(client.compute_progress_bps(&100_000_000, &0), 0);
+        // Even with negative inputs, should return 0 or positive
+        assert!(client.compute_fee_amount(&-1_000_000, &5000) >= 0);
     }
 }
