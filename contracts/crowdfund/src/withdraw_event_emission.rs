@@ -1,79 +1,30 @@
 //! Bounded `withdraw()` Event Emission Module
 //!
-//! This module provides the logic for capped NFT minting during campaign withdrawal.
-//! It prevents unbounded gas consumption by limiting the number of NFT mints per
-//! `withdraw()` call and emits a single summary event instead of many individual events.
+//! Provides three focused emit helpers and bounded NFT minting for the
+//! crowdfund contract's `withdraw()` function.
 //!
-//! ## Features
+//! ## Security Invariants
 //!
-//! - **Gas Efficiency**: Caps NFT minting at `MAX_NFT_MINT_BATCH` per withdrawal
-//! - **Event Optimization**: Emits single batch event instead of O(n) individual events
-//! - **UX Improvement**: Provides comprehensive withdrawal data including NFT mint count
+//! - [`emit_fee_transferred`] panics if `fee <= 0` — prevents silent zero-fee events.
+//! - [`emit_nft_batch_minted`] panics if `minted_count == 0` — callers must guard.
+//! - [`emit_withdrawn`] panics if `creator_payout <= 0` — prevents zero-payout withdrawals.
 //!
-//! ## Usage
+//! ## Performance
 //!
-//! This module is used by the main crowdfund contract's `withdraw()` function.
-//! The [`mint_nfts_in_batch`] function handles all NFT minting logic with proper
-//! event emission and gas consumption limits.
-//!
-//! ## Example
-//!
-//! ```rust
-//! use crate::withdraw_event_emission::mint_nfts_in_batch;
-//!
-//! fn withdraw_impl(env: &Env) -> u32 {
-//!     let nft_contract = env.storage().instance().get::<_, Address>(&DataKey::NFTContract);
-//!     let minted_count = mint_nfts_in_batch(env, &nft_contract);
-//!     // ... continue with withdrawal ...
-//!     minted_count
-//! }
-//! ```
+//! [`mint_nfts_in_batch`] caps NFT minting at [`MAX_NFT_MINT_BATCH`] per call,
+//! bounding gas consumption and emitting a single summary event instead of O(n).
 
-use soroban_sdk::{Address, Env, IntoVal, Symbol, Vec};
+use soroban_sdk::{Address, Env, Vec};
 
-use crate::{DataKey, MAX_NFT_MINT_BATCH};
+use crate::{DataKey, NftContractClient, MAX_NFT_MINT_BATCH};
 
-/// Mint NFTs to eligible contributors in a single batch.
+/// Mint NFTs to eligible contributors, capped at `MAX_NFT_MINT_BATCH`.
 ///
-/// Processes at most `MAX_NFT_MINT_BATCH` contributors per call to prevent
-/// unbounded gas consumption. Emits a single `nft_batch_minted` summary event
-/// with the total count of NFTs minted.
-///
-/// # Parameters
-///
-/// - `env`: The Soroban environment
-/// - `nft_contract`: Optional address of the NFT contract to mint to contributors
-///
-/// # Returns
-///
-/// The number of NFTs minted in this batch (0 if no NFT contract or no eligible contributors).
-///
-/// # Events Emitted
-///
-/// - `("campaign", "nft_batch_minted")` with `u32` count (only when > 0 minted)
-///
-/// # Security Considerations
-///
-/// - Contributors beyond the cap are NOT permanently skipped - they can be minted
-///   in subsequent `withdraw()` calls if the campaign owner calls withdraw again.
-/// - The cap is a compile-time constant. Changing it requires a contract upgrade.
-/// - This function assumes the NFT contract has a `mint` function that accepts
-///   `(Address, u64)` as arguments (recipient, token_id).
-///
-/// # Performance
-///
-/// - Time Complexity: O(min(n, MAX_NFT_MINT_BATCH)) where n is contributor count
-/// - Space Complexity: O(1) - uses constant extra space
-/// - Event Emission: O(1) - single batch event instead of O(n) individual events
-///
-/// # Edge Cases
-///
-/// - When `nft_contract` is `None`: returns 0, emits no events
-/// - When no eligible contributors (all have 0 contribution): returns 0, emits no batch event
-/// - When exactly `MAX_NFT_MINT_BATCH` contributors: mints exactly that many
-/// - When > `MAX_NFT_MINT_BATCH` contributors: caps at MAX, allows remaining to be minted later
+/// Emits a single `("campaign", "nft_batch_minted")` event with the count
+/// when at least one NFT is minted. Returns 0 and emits nothing when
+/// `nft_contract` is `None` or no contributor has a positive balance.
 pub fn mint_nfts_in_batch(env: &Env, nft_contract: &Option<Address>) -> u32 {
-    let Some(nft_contract) = nft_contract else {
+    let Some(nft_addr) = nft_contract else {
         return 0;
     };
 
@@ -83,80 +34,68 @@ pub fn mint_nfts_in_batch(env: &Env, nft_contract: &Option<Address>) -> u32 {
         .get(&DataKey::Contributors)
         .unwrap_or_else(|| Vec::new(env));
 
-    let mut token_id: u64 = 1;
+    let client = NftContractClient::new(env, nft_addr);
     let mut minted: u32 = 0;
 
-    // Process contributors up to MAX_NFT_MINT_BATCH
     for contributor in contributors.iter() {
         if minted >= MAX_NFT_MINT_BATCH {
             break;
         }
-
-        // Get contribution amount for this contributor
         let contribution: i128 = env
             .storage()
             .persistent()
             .get(&DataKey::Contribution(contributor.clone()))
             .unwrap_or(0);
-
-        // Only mint NFT for contributors with non-zero contributions
         if contribution > 0 {
-            // Invoke the NFT contract's mint function
-            // The NFT contract must implement: fn mint(env: Env, to: Address, token_id: u64)
-            env.invoke_contract::<()>(
-                nft_contract,
-                &Symbol::new(env, "mint"),
-                Vec::from_array(env, [contributor.into_val(env), token_id.into_val(env)]),
-            );
-            token_id += 1;
+            client.mint(&contributor);
             minted += 1;
         }
     }
 
-    // Emit single summary event instead of one event per contributor.
-    // This improves UX by reducing event log noise and improves
-    // indexer performance with O(1) events vs O(n).
     if minted > 0 {
-        env.events().publish(("campaign", "nft_batch_minted"), minted);
+        emit_nft_batch_minted(env, minted);
     }
 
     minted
 }
 
-/// Emit the withdrawal event with comprehensive data.
+/// Emit `("campaign", "fee_transferred")` with `(platform_address, fee)`.
 ///
-/// Publishes a single `withdrawn` event containing:
-/// - Creator address (who received the payout)
-/// - Payout amount (after platform fee deduction)
-/// - Number of NFTs minted in this withdrawal
+/// # Panics
 ///
-/// # Parameters
-///
-/// - `env`: The Soroban environment
-/// - `creator`: The campaign creator who received the payout
-/// - `payout`: The amount transferred to the creator (after fees)
-/// - `nft_minted_count`: Number of NFTs minted to contributors
-///
-/// # Event Data
-///
-/// Topic: `("campaign", "withdrawn")`
-/// Data: `(Address, i128, u32)` - (creator, payout, nft_count)
-///
-/// # Breaking Change Note
-///
-/// This event now includes a third field (nft_minted_count). Off-chain indexers
-/// that decoded the old two-field tuple `(Address, i128)` must be updated to handle
-/// the new three-field tuple `(Address, i128, u32)`.
-pub fn emit_withdrawal_event(env: &Env, creator: &Address, payout: i128, nft_minted_count: u32) {
-    env.events().publish(
-        ("campaign", "withdrawn"),
-        (creator.clone(), payout, nft_minted_count),
-    );
+/// Panics if `fee <= 0` — a zero or negative fee transfer is a logic error.
+pub fn emit_fee_transferred(env: &Env, platform: &Address, fee: i128) {
+    assert!(fee > 0, "fee_transferred: fee must be positive");
+    env.events()
+        .publish(("campaign", "fee_transferred"), (platform.clone(), fee));
 }
 
-#[cfg(test)]
-mod tests {
+/// Emit `("campaign", "nft_batch_minted")` with the minted count.
+///
+/// # Panics
+///
+/// Panics if `minted_count == 0` — callers must only call this when minting occurred.
+pub fn emit_nft_batch_minted(env: &Env, minted_count: u32) {
+    assert!(
+        minted_count > 0,
+        "nft_batch_minted: minted_count must be positive"
+    );
+    env.events()
+        .publish(("campaign", "nft_batch_minted"), minted_count);
+}
 
-    // Unit tests for the module would go here
-    // Integration tests are in withdraw_event_emission_test.rs
+/// Emit `("campaign", "withdrawn")` with `(creator, payout, nft_minted_count)`.
+///
+/// # Panics
+///
+/// Panics if `creator_payout <= 0` — a zero or negative payout is a logic error.
+pub fn emit_withdrawn(env: &Env, creator: &Address, creator_payout: i128, nft_minted_count: u32) {
+    assert!(
+        creator_payout > 0,
+        "withdrawn: creator_payout must be positive"
+    );
+    env.events().publish(
+        ("campaign", "withdrawn"),
+        (creator.clone(), creator_payout, nft_minted_count),
+    );
 }

@@ -43,7 +43,7 @@ pub mod soroban_sdk_minor;
 mod soroban_sdk_minor_test;
 
 pub mod withdraw_event_emission;
-use withdraw_event_emission::{emit_withdrawal_event, mint_nfts_in_batch};
+use withdraw_event_emission::{emit_fee_transferred, emit_withdrawn, mint_nfts_in_batch};
 #[cfg(test)]
 mod withdraw_event_emission_test;
 
@@ -717,14 +717,11 @@ impl CrowdfundContract {
 
         // Bounded NFT minting: process at most MAX_NFT_MINT_BATCH contributors
         // per withdraw() call to cap event emission and gas consumption.
-        let nft_contract: Option<Address> = env
-            .storage()
-            .instance()
-            .get(&DataKey::NFTContract);
+        let nft_contract: Option<Address> = env.storage().instance().get(&DataKey::NFTContract);
         let nft_minted_count = mint_nfts_in_batch(&env, &nft_contract);
 
-        // Single withdrawal event carrying payout, fee info, and mint count.
-        emit_withdrawal_event(&env, &creator, creator_payout, nft_minted_count);
+        // Single withdrawal event carrying payout and mint count.
+        emit_withdrawn(&env, &creator, creator_payout, nft_minted_count);
 
         Ok(())
     }
@@ -734,91 +731,10 @@ impl CrowdfundContract {
     /// Each contributor independently claims their own refund after the campaign
     /// deadline has passed and the goal was not met.
     ///
-    /// # Arguments
-    /// * `contributor` – The address claiming the refund. Must match the caller.
-    ///
     /// # Errors
     /// * [`ContractError::CampaignStillActive`] – Deadline has not yet passed.
     /// * [`ContractError::GoalReached`]         – Goal was met; no refunds available.
     /// * [`ContractError::NothingToRefund`]     – Caller has no contribution on record.
-    ///
-    /// # Security & Optimizations
-    /// * Requires `contributor.require_auth()` — only the contributor can claim.
-    /// * Zeroes the contribution record **before** transfer (checks-effects-interactions).
-    /// * Uses `checked_sub` to prevent underflow on `total_raised`.
-
-    /// * `refund_single_transfer` helper skips amount <= 0 (gas optimization).
-    /// * Debug event emitted before transfer for monitoring.
-
-    pub fn refund_single(env: Env, contributor: Address) -> Result<(), ContractError> {
-        contributor.require_auth();
-
-
-    /// Claim a refund for a single contributor (pull-based).
-    ///
-    /// # Errors
-    /// * [`ContractError::CampaignStillActive`] when deadline has not passed.
-    /// * [`ContractError::GoalReached`] when the funding goal was met.
-    /// * [`ContractError::NothingToRefund`] when the contributor has no balance.
-    pub fn refund_single(env: Env, contributor: Address) -> Result<(), ContractError> {
-        contributor.require_auth();
-
-        // A successful or cancelled campaign cannot be refunded.
-        let status: Status = env.storage().instance().get(&DataKey::Status).unwrap();
-        if status == Status::Successful || status == Status::Cancelled {
-            panic!("campaign is not active");
-        }
-
-        let deadline: u64 = env.storage().instance().get(&DataKey::Deadline).unwrap();
-        if env.ledger().timestamp() <= deadline {
-            return Err(ContractError::CampaignStillActive);
-        }
-
-        let goal: i128 = env.storage().instance().get(&DataKey::Goal).unwrap();
-        let total: i128 = env
-            .storage()
-            .instance()
-            .get(&DataKey::TotalRaised)
-            .unwrap_or(0);
-
-        if total >= goal {
-            return Err(ContractError::GoalReached);
-        }
-
-        let contribution_key = DataKey::Contribution(contributor.clone());
-        let amount: i128 = env
-            .storage()
-            .persistent()
-            .get(&contribution_key)
-            .unwrap_or(0);
-        if amount == 0 {
-            return Err(ContractError::NothingToRefund);
-        }
-
-        // ── Checks-Effects-Interactions ──────────────────────────────────────
-        refund_single_transfer(
-            &token_client,
-            &env.current_contract_address(),
-            &contributor,
-            amount,
-        );
-
-        env.storage().persistent().set(&contribution_key, &0i128);
-        env.storage()
-            .persistent()
-            .extend_ttl(&contribution_key, 100, 100);
-
-        let new_total = total.checked_sub(amount).ok_or(ContractError::Overflow)?;
-        env.storage()
-            .instance()
-            .set(&DataKey::TotalRaised, &new_total);
-
-        env.events()
-            .publish(("campaign", "refund_single"), (contributor.clone(), amount));
-
-        Ok(())
-    }
-
     pub fn refund_single(env: Env, contributor: Address) -> Result<(), ContractError> {
         contributor.require_auth();
         let amount = validate_refund_preconditions(&env, &contributor)?;
