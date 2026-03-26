@@ -25,6 +25,13 @@
 
 use soroban_sdk::{String, Vec};
 
+// ── Bounds ───────────────────────────────────────────────────────────────────
+
+/// @notice Hard cap on the number of packages processed by `audit_all_bounded`.
+/// @dev    Prevents unbounded iteration — mirrors gas-limit patterns used in
+///         on-chain contracts. Adjust upward only with a documented rationale.
+pub const MAX_PACKAGES: u32 = 500;
+
 // ── Constants ────────────────────────────────────────────────────────────────
 
 /// Minimum lockfile version that includes integrity hashes for all entries.
@@ -257,6 +264,26 @@ pub fn validate_lockfile_version(version: u32) -> bool {
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
+
+/// @notice Bounded variant of `audit_all` — rejects inputs exceeding `MAX_PACKAGES`.
+///
+/// @dev    Use this in place of `audit_all` wherever input size is not
+///         statically known, to prevent unbounded processing and ensure
+///         predictable execution time (DoS protection / gas efficiency).
+///
+/// @param packages          Vector of package entries to audit.
+/// @param min_safe_versions Map of package names to minimum safe versions.
+///
+/// @return Ok(Vec<AuditResult>) or Err with a descriptive message.
+pub fn audit_all_bounded(
+    packages: &Vec<PackageEntry>,
+    min_safe_versions: &soroban_sdk::Map<String, String>,
+) -> Result<Vec<AuditResult>, &'static str> {
+    if packages.len() > MAX_PACKAGES {
+        return Err("Input exceeds MAX_PACKAGES limit. Split into smaller batches.");
+    }
+    Ok(audit_all(packages, min_safe_versions))
+}
 
 /// @notice Check if any audit results failed.
 ///

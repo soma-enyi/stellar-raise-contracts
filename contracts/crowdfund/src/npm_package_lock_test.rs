@@ -5,7 +5,11 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::npm_package_lock::*;
+    use crate::npm_package_lock::{
+        audit_all, audit_all_bounded, audit_package, count_failures, failing_results,
+        has_failures, is_version_gte, parse_semver, validate_integrity,
+        validate_lockfile_version, AuditResult, MAX_PACKAGES, PackageEntry,
+    };
     use soroban_sdk::{Env, Map, String, Vec};
 
     // ── Helpers ──────────────────────────────────────────────────────────────
@@ -518,5 +522,82 @@ mod tests {
         });
 
         assert_eq!(count_failures(&results), 0);
+    }
+
+    // ── audit_all_bounded Tests ──────────────────────────────────────────────────
+
+    #[test]
+    fn test_audit_all_bounded_within_limit_returns_ok() {
+        let env = Env::default();
+        let mut packages = Vec::new(&env);
+        packages.push_back(create_entry("svgo", "3.3.3", "sha512-abc123", true));
+        let advisories = create_advisory_map(vec![("svgo", "3.3.3")]);
+        assert!(audit_all_bounded(&packages, &advisories).is_ok());
+    }
+
+    #[test]
+    fn test_audit_all_bounded_empty_input_returns_ok() {
+        let env = Env::default();
+        let packages = Vec::new(&env);
+        let advisories = create_advisory_map(vec![]);
+        assert!(audit_all_bounded(&packages, &advisories).is_ok());
+    }
+
+    #[test]
+    fn test_audit_all_bounded_results_match_audit_all() {
+        let env = Env::default();
+        let mut packages = Vec::new(&env);
+        packages.push_back(create_entry("svgo", "3.3.2", "sha512-abc123", true));
+        packages.push_back(create_entry("svgo", "3.3.3", "sha512-abc123", true));
+        let advisories = create_advisory_map(vec![("svgo", "3.3.3")]);
+
+        let bounded = audit_all_bounded(&packages, &advisories).unwrap();
+        let unbounded = audit_all(&packages, &advisories);
+        assert_eq!(bounded.len(), unbounded.len());
+        for i in 0..bounded.len() {
+            assert_eq!(
+                bounded.get(i).unwrap().passed,
+                unbounded.get(i).unwrap().passed
+            );
+        }
+    }
+
+    #[test]
+    fn test_audit_all_bounded_over_limit_returns_err() {
+        let env = Env::default();
+        let mut packages = Vec::new(&env);
+        // MAX_PACKAGES is 500; push 501 entries
+        for i in 0u32..501 {
+            packages.push_back(create_entry(
+                &format!("pkg-{}", i),
+                "1.0.0",
+                "sha512-abc123",
+                false,
+            ));
+        }
+        let advisories = create_advisory_map(vec![]);
+        assert!(audit_all_bounded(&packages, &advisories).is_err());
+    }
+
+    #[test]
+    fn test_audit_all_bounded_error_message_is_descriptive() {
+        let env = Env::default();
+        let mut packages = Vec::new(&env);
+        for i in 0u32..501 {
+            packages.push_back(create_entry(
+                &format!("pkg-{}", i),
+                "1.0.0",
+                "sha512-abc123",
+                false,
+            ));
+        }
+        let advisories = create_advisory_map(vec![]);
+        let err = audit_all_bounded(&packages, &advisories).unwrap_err();
+        assert!(err.contains("MAX_PACKAGES"));
+    }
+
+    #[test]
+    fn test_max_packages_constant_is_positive() {
+        assert!(MAX_PACKAGES > 0);
     }
 }
