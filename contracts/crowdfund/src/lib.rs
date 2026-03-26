@@ -43,7 +43,7 @@ pub mod soroban_sdk_minor;
 mod soroban_sdk_minor_test;
 
 pub mod withdraw_event_emission;
-use withdraw_event_emission::{emit_withdrawal_event, mint_nfts_in_batch};
+use withdraw_event_emission::{emit_fee_transferred, emit_withdrawn, mint_nfts_in_batch};
 #[cfg(test)]
 mod withdraw_event_emission_test;
 
@@ -724,7 +724,7 @@ impl CrowdfundContract {
         let nft_minted_count = mint_nfts_in_batch(&env, &nft_contract);
 
         // Single withdrawal event carrying payout, fee info, and mint count.
-        emit_withdrawal_event(&env, &creator, creator_payout, nft_minted_count);
+        emit_withdrawn(&env, &creator, creator_payout, nft_minted_count);
 
         Ok(())
     }
