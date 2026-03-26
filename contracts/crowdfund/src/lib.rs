@@ -462,7 +462,7 @@ impl CrowdfundContract {
             .get(&DataKey::MinContribution)
             .unwrap();
         if amount < min_contribution {
-            return Err(ContractError::AmountTooLow);
+            panic!("amount below minimum");
         }
 
         let deadline: u64 = env.storage().instance().get(&DataKey::Deadline).unwrap();
@@ -1194,4 +1194,5 @@ impl CrowdfundContract {
     pub fn nft_contract(env: Env) -> Option<Address> {
         env.storage().instance().get(&DataKey::NFTContract)
     }
+}
 }

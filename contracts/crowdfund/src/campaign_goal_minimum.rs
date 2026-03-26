@@ -58,8 +58,24 @@ pub fn validate_goal(goal: i128) -> Result<(), &'static str> {
     Ok(())
 }
 
-/// Validates that min_contribution meets the minimum floor.
-/// Returns Ok(()) if valid; Err(&'static str) otherwise.
+/// Validates that `min_contribution` meets the minimum floor.
+///
+/// ## Integer-overflow safety
+///
+/// The comparison `goal_amount < MIN_GOAL_AMOUNT` is a single signed integer
+/// comparison — no arithmetic is performed, so overflow is impossible.
+#[inline]
+pub fn validate_goal_amount(
+    _env: &soroban_sdk::Env,
+    goal_amount: i128,
+) -> Result<(), crate::ContractError> {
+    if goal_amount < MIN_GOAL_AMOUNT {
+        return Err(crate::ContractError::GoalTooLow);
+    }
+    Ok(())
+}
+
+/// Validates that `min_contribution` meets the minimum floor.
 #[inline]
 pub fn validate_min_contribution(min_contribution: i128) -> Result<(), &'static str> {
     if min_contribution < MIN_CONTRIBUTION_AMOUNT {
@@ -89,32 +105,6 @@ pub fn validate_platform_fee(fee_bps: u32) -> Result<(), &'static str> {
 }
 
 // ── On-chain / typed-error validator ─────────────────────────────────────────
-
-/// Validates that goal_amount meets the minimum threshold.
-/// Returns ContractError::GoalTooLow when goal_amount < MIN_GOAL_AMOUNT.
-///
-/// Security: A zero-goal campaign is immediately "successful" after any
-/// contribution, letting the creator drain funds with no real commitment.
-/// Integer-overflow safety: single signed comparison, no arithmetic.
-#[inline]
-pub fn validate_min_contribution(min_contribution: i128) -> Result<(), &'static str> {
-    if min_contribution < MIN_CONTRIBUTION_AMOUNT {
-        return Err("min_contribution must be at least MIN_CONTRIBUTION_AMOUNT");
-    }
-    Ok(())
-}
-
-/// Validates that `min_contribution` meets the minimum floor.
-pub const MIN_CONTRIBUTION_AMOUNT: i128 = 1;
-pub const MIN_GOAL_AMOUNT: i128 = 100;
-
-#[inline]
-pub fn compute_progress_bps(total_raised: i128, goal: i128) -> u32 {
-    if goal <= 0 {
-        return 0;
-    }
-    Ok(())
-}
 
 /// @notice Computes campaign funding progress in basis points.
 ///
