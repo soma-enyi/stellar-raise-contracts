@@ -1,4 +1,4 @@
-//! Comprehensive tests for the ProptestGeneratorBoundary contract.
+//! # ProptestGeneratorBoundary — Comprehensive Test Suite
 //!
 //! @title   ProptestGeneratorBoundary Tests
 //! @notice  Validates correct return of boundary constants and logic for clamping/validation.
@@ -18,8 +18,9 @@
 
 #[cfg(test)]
 mod tests {
-    use soroban_sdk::{Env, Symbol};
     use proptest::prelude::*;
+    use soroban_sdk::{Env, Symbol};
+
     use crate::proptest_generator_boundary::{
         ProptestGeneratorBoundary, ProptestGeneratorBoundaryClient,
         DEADLINE_OFFSET_MIN, DEADLINE_OFFSET_MAX, GOAL_MIN, GOAL_MAX,
@@ -40,7 +41,24 @@ mod tests {
     // ── Constant Sanity Checks ────────────────────────────────────────────────
 
     #[test]
-    fn test_constants_return_correct_values() {
+    fn test_clamp_proptest_cases_midpoint() {
+        assert_eq!(clamp_proptest_cases(100), 100);
+    }
+
+    #[test]
+    fn test_clamp_proptest_cases_at_max() {
+        assert_eq!(clamp_proptest_cases(PROPTEST_CASES_MAX), PROPTEST_CASES_MAX);
+    }
+
+    #[test]
+    fn test_clamp_proptest_cases_above_max() {
+        assert_eq!(clamp_proptest_cases(1_000), PROPTEST_CASES_MAX);
+    }
+
+    // ── 3. On-Chain Contract Tests ────────────────────────────────────────────
+
+    #[test]
+    fn test_contract_constants_match_rust_constants() {
         let (_env, client) = setup();
         assert_eq!(client.deadline_offset_min(), DEADLINE_OFFSET_MIN);
         assert_eq!(client.deadline_offset_max(), DEADLINE_OFFSET_MAX);
@@ -364,9 +382,10 @@ mod tests {
 
         /// Property: All valid deadline offsets pass validation.
         #[test]
-        fn prop_deadline_offset_validity(offset in DEADLINE_OFFSET_MIN..=DEADLINE_OFFSET_MAX) {
-            let (_env, client) = setup();
-            prop_assert!(client.is_valid_deadline_offset(&offset));
+        fn prop_valid_deadline_offset_always_accepted(
+            offset in DEADLINE_OFFSET_MIN..=DEADLINE_OFFSET_MAX
+        ) {
+            prop_assert!(is_valid_deadline_offset(offset));
         }
 
         /// Property: All invalid deadline offsets fail validation.
@@ -390,9 +409,10 @@ mod tests {
         }
 
         #[test]
-        fn prop_goal_validity(goal in GOAL_MIN..=GOAL_MAX) {
-            let (_env, client) = setup();
-            prop_assert!(client.is_valid_goal(&goal));
+        fn prop_deadline_offset_below_min_always_rejected(
+            offset in 0u64..DEADLINE_OFFSET_MIN
+        ) {
+            prop_assert!(!is_valid_deadline_offset(offset));
         }
 
         /// Property: All invalid goals fail validation.

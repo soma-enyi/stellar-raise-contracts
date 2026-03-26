@@ -7,6 +7,8 @@
 // 4. validate_goal_amount is called before any env.storage() write.
 // 5. Constants are baked into WASM; changes require a contract upgrade.
 
+use soroban_sdk::{Address, Env};
+
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 /// Minimum campaign goal in token units.
@@ -37,21 +39,17 @@ pub fn create_campaign(env: Env, creator: Address, goal: u64) {
 pub const MIN_DEADLINE_OFFSET: u64 = 60;
 
 /// Maximum platform fee in basis points (10 000 bps = 100 %).
-/// Prevents a misconfigured platform from taking more than 100 % of raised funds.
 pub const MAX_PLATFORM_FEE_BPS: u32 = 10_000;
 
 /// Denominator used when computing progress in basis points.
-/// Must equal MAX_PROGRESS_BPS so a fully-met goal returns exactly MAX_PROGRESS_BPS.
 pub const PROGRESS_BPS_SCALE: i128 = 10_000;
 
 /// Maximum value returned by compute_progress_bps.
-/// Capped at this value even when total_raised > goal (over-funded).
 pub const MAX_PROGRESS_BPS: u32 = 10_000;
 
 // ── Off-chain / string-error validators ──────────────────────────────────────
 
 /// Validates that goal meets the minimum threshold.
-/// Returns Ok(()) if goal >= MIN_GOAL_AMOUNT; Err(&'static str) otherwise.
 #[inline]
 pub fn validate_goal(goal: i128) -> Result<(), &'static str> {
     if goal < MIN_GOAL_AMOUNT {
@@ -87,7 +85,6 @@ pub fn validate_min_contribution(min_contribution: i128) -> Result<(), &'static 
 }
 
 /// Validates that deadline is sufficiently far in the future.
-/// Uses saturating_add to prevent overflow when now is near u64::MAX.
 #[inline]
 pub fn validate_deadline(now: u64, deadline: u64) -> Result<(), &'static str> {
     let min_deadline = now.saturating_add(MIN_DEADLINE_OFFSET);

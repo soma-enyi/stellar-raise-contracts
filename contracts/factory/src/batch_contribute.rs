@@ -96,20 +96,13 @@ pub fn batch_contribute(env: &Env, contributor: &Address, entries: Vec<Contribut
         let _: () = env.invoke_contract(
             &entry.campaign,
             &Symbol::new(env, "contribute"),
-            soroban_sdk::vec![
-                env,
-                contributor.clone().into(),
-                entry.amount.into(),
-            ],
+            soroban_sdk::vec![env, contributor.clone().into(), entry.amount.into(),],
         );
     }
 
     // Emit a single summary event — cheaper than one event per campaign.
     env.events().publish(
-        (
-            Symbol::new(env, "batch"),
-            Symbol::new(env, "contributed"),
-        ),
+        (Symbol::new(env, "batch"), Symbol::new(env, "contributed")),
         (contributor.clone(), len),
     );
 }

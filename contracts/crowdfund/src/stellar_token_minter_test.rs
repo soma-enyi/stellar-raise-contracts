@@ -73,9 +73,7 @@ impl MockNft {
             .instance()
             .get(&MockNftKey::Count)
             .unwrap_or(0u32);
-        env.storage()
-            .instance()
-            .set(&MockNftKey::Count, &(n + 1));
+        env.storage().instance().set(&MockNftKey::Count, &(n + 1));
     }
 
     pub fn count(env: Env) -> u32 {
@@ -128,10 +126,6 @@ fn init_campaign(
         &goal,
         &deadline,
         &TEST_MIN_CONTRIBUTION,
-        &None,
-        &None,
-        &None,
-        &None,
         &None,
         &None,
         &None,
@@ -371,7 +365,13 @@ fn test_withdraw_nft_mint_below_batch_limit() {
 fn test_collect_pledges_emits_single_summary_event() {
     let (env, client, creator, token_addr, token_admin) = setup();
     let deadline = env.ledger().timestamp() + TEST_DEADLINE_OFFSET;
-    init_campaign(&client, &creator, &token_addr, TEST_BONUS_PRIMARY_GOAL, deadline);
+    init_campaign(
+        &client,
+        &creator,
+        &token_addr,
+        TEST_BONUS_PRIMARY_GOAL,
+        deadline,
+    );
 
     let c1 = Address::generate(&env);
     let c2 = Address::generate(&env);
@@ -403,10 +403,6 @@ fn test_bonus_goal_event_emitted_exactly_once() {
         &TEST_MIN_CONTRIBUTION,
         &None,
         &Some(TEST_BONUS_GOAL),
-        &None,
-        &None,
-        &None,
-        &None,
         &None,
     );
 
@@ -504,7 +500,13 @@ fn test_contribute_zero_amount_returns_error() {
 fn test_collect_pledges_before_deadline_returns_error() {
     let (env, client, creator, token_addr, token_admin) = setup();
     let deadline = env.ledger().timestamp() + TEST_DEADLINE_OFFSET;
-    init_campaign(&client, &creator, &token_addr, TEST_BONUS_PRIMARY_GOAL, deadline);
+    init_campaign(
+        &client,
+        &creator,
+        &token_addr,
+        TEST_BONUS_PRIMARY_GOAL,
+        deadline,
+    );
 
     let p = Address::generate(&env);
     mint(&env, &token_addr, &p, TEST_PLEDGE_CONTRIBUTION);

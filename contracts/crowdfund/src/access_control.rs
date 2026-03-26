@@ -213,9 +213,7 @@ pub fn transfer_pauser(env: &Env, caller: &Address, new_pauser: &Address) {
         panic!("only DEFAULT_ADMIN_ROLE can transfer pauser role");
     }
 
-    env.storage()
-        .instance()
-        .set(&DataKey::Pauser, new_pauser);
+    env.storage().instance().set(&DataKey::Pauser, new_pauser);
 
     env.events().publish(
         (

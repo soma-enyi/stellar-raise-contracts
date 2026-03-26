@@ -42,11 +42,8 @@
 
 #[cfg(test)]
 mod tests {
-    use soroban_sdk::{
-        testutils::{Address as _, Events},
-        Address, Env, Symbol, Vec,
-    };
-    use crate::stellar_token_minter::{StellarTokenMinter, StellarTokenMinterClient};
+    use crate::stellar_token_minter::StellarTokenMinter;
+    use soroban_sdk::{testutils::Address as _, Address, Env};
 
     // ══════════════════════════════════════════════════════════════════════════
     // Test Helpers
@@ -58,11 +55,11 @@ mod tests {
     /// @return (Env, StellarTokenMinterClient, admin Address, minter Address)
     fn setup() -> (Env, StellarTokenMinterClient<'static>, Address, Address) {
         let env = Env::default();
+        env.mock_all_auths();
         let admin = Address::generate(&env);
         let minter = Address::generate(&env);
         let contract_id = env.register(StellarTokenMinter, ());
-        let client = StellarTokenMinterClient::new(&env, &contract_id);
-        (env, client, admin, minter)
+        (env, contract_id, admin, minter)
     }
 
     /// @notice Creates a test environment with `mock_all_auths` enabled.

@@ -1,7 +1,16 @@
-//! Comprehensive tests for proptest generator boundary conditions.
+//! # Proptest Generator Boundary — Standalone Property Tests
 //!
-//! Ensures boundary constants and validators behave correctly for frontend UI
-//! display and property-based test stability.
+//! @title   ProptestGeneratorBoundary Standalone Tests
+//! @notice  Property-based and unit tests for boundary validators using pure
+//!          functions (no Soroban `Env` required). Suitable for fast CI runs.
+//! @dev     These tests complement `proptest_generator_boundary.test.rs` which
+//!          exercises the on-chain contract client interface.
+//!
+//! ## Security Notes
+//!
+//! - Deadline offset 100 (old buggy minimum) must be rejected.
+//! - `goal == 0` must never reach division logic.
+//! - `progress_bps` must never exceed `PROGRESS_BPS_CAP` (10 000).
 
 use proptest::prelude::*;
 use proptest::strategy::Just;
@@ -12,7 +21,7 @@ use crate::proptest_generator_boundary::{
     GOAL_MIN, MIN_CONTRIBUTION_FLOOR, PROGRESS_BPS_CAP,
 };
 
-// ── Strategy definitions ─────────────────────────────────────────────────────
+// ── Strategy Definitions ──────────────────────────────────────────────────────
 
 fn valid_deadline_offset_strategy() -> impl Strategy<Value = u64> {
     DEADLINE_OFFSET_MIN..=DEADLINE_OFFSET_MAX
@@ -22,12 +31,7 @@ fn valid_goal_strategy() -> impl Strategy<Value = i128> {
     GOAL_MIN..=GOAL_MAX
 }
 
-#[allow(dead_code)]
-fn valid_min_contribution_strategy(goal: i128) -> impl Strategy<Value = i128> {
-    MIN_CONTRIBUTION_FLOOR..=goal
-}
-
-// ── Property tests ───────────────────────────────────────────────────────────
+// ── Property Tests ────────────────────────────────────────────────────────────
 
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(256))]
@@ -44,7 +48,7 @@ proptest! {
         prop_assert!(is_valid_goal(goal));
     }
 
-    /// Deadline offset below DEADLINE_OFFSET_MIN is rejected (typo fix: was 100).
+    /// Deadline offset below DEADLINE_OFFSET_MIN is rejected.
     #[test]
     fn prop_deadline_offset_below_min_rejected(offset in 0u64..DEADLINE_OFFSET_MIN) {
         prop_assert!(!is_valid_deadline_offset(offset));
@@ -90,7 +94,7 @@ proptest! {
 
     /// Clamp progress bps never exceeds PROGRESS_BPS_CAP.
     #[test]
-    fn prop_clamp_progress_bps_capped(raw in -1000i128..=20000i128) {
+    fn prop_clamp_progress_bps_capped(raw in -1_000i128..=20_000i128) {
         let clamped = clamp_progress_bps(raw);
         prop_assert!(clamped <= PROGRESS_BPS_CAP);
     }
@@ -102,12 +106,13 @@ proptest! {
     }
 }
 
-// ── Unit tests for edge cases ────────────────────────────────────────────────
+// ── Unit Tests for Edge Cases ─────────────────────────────────────────────────
 
 #[cfg(test)]
 mod edge_case_tests {
     use super::*;
 
+    /// @security Old buggy minimum of 100 must be rejected after the fix.
     #[test]
     fn boundary_100_rejected_typo_fix() {
         assert!(!is_valid_deadline_offset(100));
@@ -115,9 +120,10 @@ mod edge_case_tests {
 
     #[test]
     fn boundary_1000_accepted() {
-        assert!(is_valid_deadline_offset(1000));
+        assert!(is_valid_deadline_offset(1_000));
     }
 
+    /// @security goal == 0 must be rejected to prevent division-by-zero.
     #[test]
     fn goal_zero_rejected() {
         assert!(!is_valid_goal(0));
