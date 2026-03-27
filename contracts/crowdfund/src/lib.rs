@@ -13,6 +13,7 @@ pub mod cargo_toml_rust;
 pub mod contract_state_size;
 pub mod contribute_error_handling;
 pub mod crowdfund_initialize_function;
+pub mod role_based_access;
 #[cfg(test)]
 #[cfg(test)]
 pub mod npm_package_lock;
@@ -81,6 +82,9 @@ mod stream_processing_optimization_test;
 #[cfg(test)]
 #[path = "security_compliance_automation.test.rs"]
 mod security_compliance_automation_test;
+#[cfg(test)]
+#[path = "role_based_access.test.rs"]
+mod role_based_access_test;
 
 // --- Constants ---
 const CONTRACT_VERSION: u32 = 3;
