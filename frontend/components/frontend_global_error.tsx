@@ -148,22 +148,35 @@ export const boundaryRateLimiter = new BoundaryRateLimiter();
 const CONTRACT_KEYWORDS = [
   'contract', 'stellar', 'soroban', 'transaction',
   'blockchain', 'ledger', 'horizon', 'xdr', 'invoke', 'wallet',
-];
+] as const;
+
+/**
+ * @dev Classification result is cached via WeakMap so repeated renders
+ * do not re-scan the error message string (gas/CPU efficiency).
+ */
+const _classificationCache = new WeakMap<Error, boolean>();
 
 /**
  * @dev Determines whether an error is related to smart contract execution.
  * @custom:security Unknown error types default to the generic handler (safer path).
  */
 export function isSmartContractError(error: Error): boolean {
+  if (_classificationCache.has(error)) {
+    return _classificationCache.get(error)!;
+  }
+  let result: boolean;
   if (
     error instanceof ContractError ||
     error instanceof NetworkError ||
     error instanceof TransactionError
   ) {
-    return true;
+    result = true;
+  } else {
+    const haystack = `${error.name} ${error.message}`.toLowerCase();
+    result = CONTRACT_KEYWORDS.some((kw) => haystack.includes(kw));
   }
-  const haystack = `${error.name} ${error.message}`.toLowerCase();
-  return CONTRACT_KEYWORDS.some((kw) => haystack.includes(kw));
+  _classificationCache.set(error, result);
+  return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -231,6 +244,9 @@ export function buildErrorReport(
 // Component types
 // ---------------------------------------------------------------------------
 
+/** Maximum number of retry attempts before the retry button is hidden. */
+export const MAX_RETRIES = 3;
+
 export interface FrontendGlobalErrorBoundaryProps {
   /** @dev The child component tree to protect with this error boundary. */
   children?: ReactNode;
@@ -256,6 +272,8 @@ interface BoundaryState {
   hasError: boolean;
   error: Error | null;
   isSmartContractError: boolean;
+  /** Number of retry attempts made so far. */
+  retryCount: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -269,7 +287,7 @@ interface BoundaryState {
  * @dev Catches synchronous render-phase errors anywhere in the wrapped component
  * tree, classifies them (generic vs. smart-contract), emits a structured and
  * rate-limited log entry, and renders an appropriate fallback UI with a
- * "Try Again" recovery path.
+ * "Try Again" recovery path (capped at MAX_RETRIES).
  *
  * Logging pipeline:
  *   buildBoundaryLogEntry -> sanitizeErrorMessage -> boundaryRateLimiter.isAllowed()
@@ -280,6 +298,7 @@ interface BoundaryState {
  *   - Error messages are sanitised before logging to strip potential secrets.
  *   - Log entries are rate-limited (10 per 60 s) to prevent flooding.
  *   - Fallback UI uses only static strings — no raw error data in innerHTML (XSS safe).
+ *   - Classification results are cached via WeakMap to avoid redundant string scans.
  *
  * @custom:limitations
  *   - Does NOT catch errors in async event handlers, setTimeout, or SSR.
@@ -294,15 +313,24 @@ export class FrontendGlobalErrorBoundary extends Component<
 
   constructor(props: FrontendGlobalErrorBoundaryProps) {
     super(props);
-    this.state = { hasError: false, error: null, isSmartContractError: false };
+    this.state = { hasError: false, error: null, isSmartContractError: false, retryCount: 0 };
     this.handleRetry = this.handleRetry.bind(this);
   }
 
-  static getDerivedStateFromError(error: Error): BoundaryState {
+  /**
+   * @dev Updates component state so the next render shows the fallback UI.
+   * Non-Error thrown values are normalised to Error here so downstream code
+   * can always rely on a proper Error instance.
+   */
+  static getDerivedStateFromError(error: unknown): Partial<BoundaryState> {
+    const err =
+      error instanceof Error
+        ? error
+        : new Error(error != null ? String(error) : 'An unexpected error occurred');
     return {
       hasError: true,
-      error,
-      isSmartContractError: isSmartContractError(error),
+      error: err,
+      isSmartContractError: isSmartContractError(err),
     };
   }
 
@@ -313,7 +341,8 @@ export class FrontendGlobalErrorBoundary extends Component<
    * the full entry to signal suppression without flooding the log.
    */
   componentDidCatch(error: Error, errorInfo: ErrorInfo): void {
-    const isContract = isSmartContractError(error);
+    const normalisedError = this.state.error ?? error;
+    const isContract = isSmartContractError(normalisedError);
     this.logSequence += 1;
 
     if (!boundaryRateLimiter.isAllowed()) {
@@ -324,7 +353,7 @@ export class FrontendGlobalErrorBoundary extends Component<
       return;
     }
 
-    const logEntry = buildBoundaryLogEntry(error, errorInfo, isContract, this.logSequence);
+    const logEntry = buildBoundaryLogEntry(normalisedError, errorInfo, isContract, this.logSequence);
 
     console.error('Documentation Error Boundary caught an error:', error, errorInfo);
 
@@ -332,20 +361,31 @@ export class FrontendGlobalErrorBoundary extends Component<
       this.props.onLog(logEntry);
     }
 
-    const report = buildErrorReport(error, errorInfo, isContract);
+    const report = buildErrorReport(normalisedError, errorInfo, isContract);
     if (typeof this.props.onError === 'function') {
       this.props.onError(report);
     }
   }
 
+  /**
+   * @dev Resets error state so the child tree is re-rendered.
+   * Capped at MAX_RETRIES to prevent infinite retry loops on unrecoverable errors.
+   */
   handleRetry(): void {
-    this.setState({ hasError: false, error: null, isSmartContractError: false });
+    if (this.state.retryCount >= MAX_RETRIES) return;
+    this.setState((prev) => ({
+      hasError: false,
+      error: null,
+      isSmartContractError: false,
+      retryCount: prev.retryCount + 1,
+    }));
   }
 
   render(): ReactNode {
-    const { hasError, error, isSmartContractError: isContract } = this.state;
+    const { hasError, error, isSmartContractError: isContract, retryCount } = this.state;
     const { fallback, children } = this.props;
     const isDev = process.env.NODE_ENV !== 'production';
+    const canRetry = retryCount < MAX_RETRIES;
 
     if (!hasError) return children ?? null;
     if (fallback) return fallback;
@@ -369,9 +409,14 @@ export class FrontendGlobalErrorBoundary extends Component<
             </details>
           )}
           <div style={styles.actions}>
-            <button onClick={this.handleRetry} style={styles.primaryButton} aria-label="Try Again">Try Again</button>
+            {canRetry && (
+              <button onClick={this.handleRetry} style={styles.primaryButton} aria-label="Try Again">Try Again</button>
+            )}
             <button onClick={() => { window.location.href = '/'; }} style={styles.secondaryButton} aria-label="Go Home">Go Home</button>
           </div>
+          {!canRetry && (
+            <p style={styles.hint} role="status">Maximum retry attempts reached. Please reload the page.</p>
+          )}
         </div>
       );
     }
@@ -390,9 +435,14 @@ export class FrontendGlobalErrorBoundary extends Component<
           </details>
         )}
         <div style={styles.actions}>
-          <button onClick={this.handleRetry} style={styles.primaryButton} aria-label="Try Again">Try Again</button>
+          {canRetry && (
+            <button onClick={this.handleRetry} style={styles.primaryButton} aria-label="Try Again">Try Again</button>
+          )}
           <button onClick={() => { window.location.href = '/'; }} style={styles.secondaryButton} aria-label="Go Home">Go Home</button>
         </div>
+        {!canRetry && (
+          <p style={styles.hint} role="status">Maximum retry attempts reached. Please reload the page.</p>
+        )}
       </div>
     );
   }

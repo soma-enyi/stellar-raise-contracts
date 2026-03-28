@@ -11,6 +11,7 @@ import {
   isSmartContractError,
   buildBoundaryLogEntry,
   buildErrorReport,
+  MAX_RETRIES,
   type ErrorReport,
   type BoundaryLogEntry,
 } from './frontend_global_error';
