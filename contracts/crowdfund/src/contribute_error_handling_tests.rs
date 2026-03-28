@@ -265,6 +265,27 @@ fn is_retryable_state_errors_are_not_retryable() {
 
 // ── diagnostic events ─────────────────────────────────────────────────────────
 
+/// Returns the last `contribute_error` event as `(variant_symbol, error_code)`.
+fn last_contribute_error_event(env: &Env) -> Option<(Symbol, u32)> {
+    let topic0_str = soroban_sdk::String::from_str(env, "contribute_error");
+    env.events()
+        .all()
+        .iter()
+        .rev()
+        .find_map(|(_, topics, data)| {
+            if topics.len() < 2 {
+                return None;
+            }
+            let t0 = soroban_sdk::String::from_val(env, &topics.get(0)?).ok()?;
+            if t0 != topic0_str {
+                return None;
+            }
+            let t1 = Symbol::from_val(env, &topics.get(1)?).ok()?;
+            let code = u32::from_val(env, &data).ok()?;
+            Some((t1, code))
+        })
+}
+
 #[test]
 fn error_event_emitted_on_campaign_ended() {
     let (env, client, contributor) = setup();
