@@ -16,9 +16,19 @@ import {
 } from './frontend_global_error';
 
 const originalConsoleError = console.error;
-beforeAll(() => { console.error = jest.fn(); });
-afterAll(() => { console.error = originalConsoleError; });
-beforeEach(() => { jest.clearAllMocks(); });
+const originalConsoleWarn = console.warn;
+beforeAll(() => {
+  console.error = jest.fn();
+  console.warn = jest.fn();
+});
+afterAll(() => {
+  console.error = originalConsoleError;
+  console.warn = originalConsoleWarn;
+});
+beforeEach(() => {
+  jest.clearAllMocks();
+  boundaryRateLimiter.reset();
+});
 
 const Throw = ({ error }: { error: Error }) => { throw error; };
 
@@ -638,5 +648,77 @@ describe('Error classification edge cases', () => {
       </FrontendGlobalErrorBoundary>,
     );
     expect(screen.getByText('Smart Contract Error')).toBeTruthy();
+  });
+});
+
+// ── Documentation accuracy tests ─────────────────────────────────────────────
+// These tests verify that the rendered UI matches what the documentation
+// describes, catching doc/code mismatches early.
+
+describe('Documentation accuracy', () => {
+  it('generic fallback title is "Documentation Loading Error" (not "Something went wrong")', () => {
+    render(
+      <FrontendGlobalErrorBoundary>
+        <Throw error={new TypeError('cannot read property x')} />
+      </FrontendGlobalErrorBoundary>,
+    );
+    expect(screen.getByText('Documentation Loading Error')).toBeTruthy();
+    expect(screen.queryByText('Something went wrong')).toBeNull();
+  });
+
+  it('smart contract fallback title is "Smart Contract Error"', () => {
+    render(
+      <FrontendGlobalErrorBoundary>
+        <Throw error={new ContractError('bad call')} />
+      </FrontendGlobalErrorBoundary>,
+    );
+    expect(screen.getByText('Smart Contract Error')).toBeTruthy();
+  });
+
+  it('generic fallback shows warning icon ⚠️', () => {
+    const { container } = render(
+      <FrontendGlobalErrorBoundary>
+        <Throw error={new Error('generic')} />
+      </FrontendGlobalErrorBoundary>,
+    );
+    expect(container.textContent).toContain('⚠️');
+  });
+
+  it('smart contract fallback shows link icon 🔗', () => {
+    const { container } = render(
+      <FrontendGlobalErrorBoundary>
+        <Throw error={new ContractError('bad')} />
+      </FrontendGlobalErrorBoundary>,
+    );
+    expect(container.textContent).toContain('🔗');
+  });
+
+  it('generic fallback has "Try Again" and "Go Home" buttons as documented', () => {
+    render(
+      <FrontendGlobalErrorBoundary>
+        <Throw error={new Error('generic')} />
+      </FrontendGlobalErrorBoundary>,
+    );
+    expect(screen.getByRole('button', { name: 'Try Again' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Go Home' })).toBeTruthy();
+  });
+
+  it('smart contract fallback has "Try Again" and "Go Home" buttons as documented', () => {
+    render(
+      <FrontendGlobalErrorBoundary>
+        <Throw error={new ContractError('bad')} />
+      </FrontendGlobalErrorBoundary>,
+    );
+    expect(screen.getByRole('button', { name: 'Try Again' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Go Home' })).toBeTruthy();
+  });
+
+  it('smart contract fallback shows wallet balance guidance as documented', () => {
+    render(
+      <FrontendGlobalErrorBoundary>
+        <Throw error={new ContractError('insufficient funds')} />
+      </FrontendGlobalErrorBoundary>,
+    );
+    expect(screen.getByText(/Check your wallet balance/i)).toBeTruthy();
   });
 });

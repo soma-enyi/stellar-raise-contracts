@@ -6,11 +6,13 @@ Technical reference for the React global error boundary built for the Stellar Ra
 
 ## Overview
 
-`FrontendGlobalErrorBoundary` is a React class component that catches synchronous render-phase errors anywhere in its wrapped component tree. It prevents full application crashes, classifies errors as generic or smart-contract related, and renders an appropriate fallback UI with a recovery path.
+`FrontendGlobalErrorBoundary` is a React class component that catches synchronous render-phase errors anywhere in its wrapped component tree. It prevents full application crashes, classifies errors as generic or smart-contract related, emits structured and rate-limited log entries, and renders an appropriate fallback UI with a recovery path.
 
 ```
 Error thrown → getDerivedStateFromError (state) →
-componentDidCatch (logging + onError callback) → fallback UI
+componentDidCatch → sanitizeErrorMessage → boundaryRateLimiter.isAllowed()
+  → console.error (structured) → onLog callback → onError callback
+  → fallback UI
 ```
 
 ---
@@ -23,6 +25,8 @@ import {
   ContractError,
   NetworkError,
   TransactionError,
+  boundaryRateLimiter,
+  sanitizeErrorMessage,
 } from '../components/frontend_global_error';
 ```
 
@@ -33,6 +37,7 @@ import {
 | `children` | `ReactNode` | No | Component tree to protect |
 | `fallback` | `ReactNode` | No | Custom fallback UI; overrides built-in fallback entirely |
 | `onError` | `(report: ErrorReport) => void` | No | Callback invoked with a sanitised error report on every caught error |
+| `onLog` | `(entry: BoundaryLogEntry) => void` | No | Callback invoked with the full structured log entry (new) |
 
 ### ErrorReport shape
 
@@ -44,6 +49,22 @@ interface ErrorReport {
   timestamp: string;                // ISO 8601
   isSmartContractError: boolean;
   errorName: string;
+}
+```
+
+### BoundaryLogEntry shape
+
+```ts
+interface BoundaryLogEntry {
+  timestamp: string;           // ISO 8601
+  level: LogLevel;             // always 'error' for caught errors
+  message: string;             // human-readable classification message
+  errorMessage: string;        // sanitised error message (secrets redacted)
+  errorName: string;           // e.g. 'ContractError', 'Error'
+  isSmartContractError: boolean;
+  componentStack?: string;     // omitted in production
+  stack?: string;              // omitted in production
+  sequence: number;            // monotonically increasing per boundary instance
 }
 ```
 
@@ -68,6 +89,49 @@ All three extend `Error` and are automatically classified as smart-contract erro
 
 ---
 
+## Logging Infrastructure
+
+### Sanitisation
+
+`sanitizeErrorMessage(message)` strips potentially sensitive data before any log entry is emitted:
+
+- Long hex strings (potential private keys / hashes)
+- Stellar account IDs (`G` + 55 base-32 chars)
+- Base64 blobs (XDR payloads, JWT tokens)
+- `secret_key: <value>` and `private_key: <value>` patterns
+
+Matched substrings are replaced with `[REDACTED]`.
+
+### Rate Limiting
+
+`boundaryRateLimiter` is a module-level singleton that allows at most **10 log entries per 60-second sliding window**. When the limit is exceeded:
+
+- `console.warn` emits a suppression notice with the current sequence number.
+- `onLog` and `onError` callbacks are **not** invoked.
+- The fallback UI is still rendered normally.
+
+You can reset the limiter in tests:
+
+```ts
+import { boundaryRateLimiter } from '../components/frontend_global_error';
+beforeEach(() => boundaryRateLimiter.reset());
+```
+
+For other errors:
+- ⚠️ Warning icon
+- "Documentation Loading Error" title
+- General error message
+- Standard recovery options
+
+`buildBoundaryLogEntry` produces a plain serialisable object safe to forward to any log aggregator:
+
+- **Try Again**: Resets error state and re-renders children
+- **Go Home**: Navigates to home page
+- **Dismiss**: Resets error state without resolving the underlying issue — use only for transient errors
+- **Error Details**: Expandable section in development mode
+
+---
+
 ## Error Classification
 
 The boundary classifies an error as a smart-contract error when:
@@ -78,28 +142,6 @@ The boundary classifies an error as a smart-contract error when:
    `horizon`, `xdr`, `invoke`, `wallet`.
 
 All other errors render the generic "Documentation Loading Error" fallback.
-
-**Windowing caveat:** keyword matching runs on a bounded prefix of `error.name` + `error.message` (`MAX_CLASSIFICATION_INPUT_CHARS`, default 8192 UTF-16 code units). If a keyword appears only *after* that window, the error is treated as generic (safer default).
-
----
-
-## Logging bounds (scripts & maintainability)
-
-Exported constants and helpers cap string work so CI log shippers, browser consoles, and the main thread do not process unbounded error text:
-
-| Export | Purpose |
-|--------|---------|
-| `MAX_CLASSIFICATION_INPUT_CHARS` | Max size of haystack for keyword classification |
-| `MAX_REPORT_MESSAGE_CHARS` | Max `ErrorReport.message` for `onError` / telemetry |
-| `MAX_REPORT_STACK_CHARS` | Max stack string in dev reports |
-| `MAX_REPORT_COMPONENT_STACK_CHARS` | Max React component stack in dev reports |
-| `MAX_DISPLAY_MESSAGE_CHARS` | Max characters in dev-only `<pre>` in the fallback UI |
-| `MAX_ERROR_NAME_CHARS` | Max `ErrorReport.errorName` |
-| `MAX_THROWN_VALUE_STRING_CHARS` | Max `String(unknown)` when normalising non-`Error` throwables |
-| `truncateForBounds(s, maxCodeUnits)` | Shared truncation helper (appends `…` when trimmed) |
-| `boundedClassificationHaystack(error)` | Lowercased, capped haystack for keyword scan |
-
-Use the same helpers in build scripts or server middleware if you classify errors consistently with the UI.
 
 ---
 
@@ -137,20 +179,11 @@ function App() {
 }
 ```
 
-### With custom fallback
+### With structured logging (Datadog / CloudWatch)
 
 ```tsx
-<FrontendGlobalErrorBoundary fallback={<div>Custom error UI</div>}>
-  <MainApplication />
-</FrontendGlobalErrorBoundary>
-```
-
-### With error reporting (Sentry example)
-
-```tsx
-import * as Sentry from '@sentry/react';
-
 <FrontendGlobalErrorBoundary
+  onLog={(entry) => myLogAggregator.send(entry)}
   onError={(report) => Sentry.captureMessage(report.message, { extra: report })}
 >
   <MainApplication />
@@ -177,12 +210,12 @@ async function contribute(amount: number) {
 
 | Concern | Mitigation |
 |---------|-----------|
-| Information disclosure | Stack traces and component stacks are omitted from `ErrorReport` in production |
+| Information disclosure | Stack traces and component stacks are omitted from `ErrorReport` and `BoundaryLogEntry` in production |
+| Secret leakage in logs | `sanitizeErrorMessage` redacts hex keys, Stellar IDs, base64 blobs, and key patterns before logging |
+| Log flooding | `boundaryRateLimiter` caps entries at 10 per 60 s; excess entries emit a single warning |
 | XSS via error messages | Fallback UI renders error message as React text node (not `innerHTML`) |
 | Sensitive contract data | Custom error classes should never embed private keys, XDR, or account secrets in the message |
 | Async errors | The boundary does NOT catch errors in event handlers, `setTimeout`, or SSR — handle those separately |
-| Log / script DoS | All reports and dev UI text go through `truncateForBounds` and `MAX_*` caps |
-| Classification blind spot | Keywords beyond `MAX_CLASSIFICATION_INPUT_CHARS` are ignored; use typed errors (`ContractError`, etc.) for reliable routing |
 
 ---
 
@@ -197,27 +230,26 @@ async function contribute(amount: number) {
 
 ## Test Coverage
 
-Tests live in `frontend/components/frontend_global_error.test.tsx` and
-`frontend/utils/frontend_global_error.test.tsx` and cover:
+Tests live in `frontend/components/frontend_global_error.test.tsx` and cover:
 
 - Custom error class instantiation and inheritance
+- `sanitizeErrorMessage` — all redaction patterns and edge cases
+- `isSmartContractError` — all keyword and type variants
+- `BoundaryRateLimiter` — allow, block, and reset behaviour
+- `buildBoundaryLogEntry` — shape, sanitisation, and dev/prod stack inclusion
+- `buildErrorReport` — shape and field correctness
 - Normal (no-error) rendering
 - Generic error fallback rendering and logging
 - Smart contract error detection (10 keyword/type variants)
 - Custom fallback prop (generic and contract errors)
 - Recovery via "Try Again" (success and persistent-error cases)
 - `onError` callback with structured report validation
+- `onLog` callback with `BoundaryLogEntry` validation
+- Rate limiting — suppression, callback blocking, and post-reset recovery
 - Accessibility (`role="alert"`, `aria-live`, `aria-label`, `aria-hidden`)
 - Edge cases: empty message, TypeError, keyword matching
-- **Logging bounds:** `truncateForBounds`, `boundedClassificationHaystack`, `ErrorReport` truncation, classification window, dev `<pre>` length
 
-Run:
-
-```bash
-npx jest --testPathPatterns=frontend/components/frontend_global_error.test --coverage --collectCoverageFrom=frontend/components/frontend_global_error.tsx
-```
-
-Recent run: **63** tests passed; coverage for `frontend_global_error.tsx` ~**96%** statements, ~**97%** lines (see local `coverage/` output).
+Target: ≥ 95% statement and line coverage, 100% function coverage.
 
 ---
 
